@@ -2,6 +2,8 @@
 
 > 2026-03-27
 
+**Note:** canopy-design.md is the authoritative design reference. This plan covers implementation phasing. The design doc (25 decisions, D1-D25) supersedes any conflicting details here.
+
 ## Vision
 
 Extend Codified Decision Trees (CDT) into a general-purpose, evolving behavioral profiling library. The first application is user behavior profiling for AI coding sessions (delulu project), but the library should be domain-agnostic.
@@ -19,134 +21,117 @@ Extend Codified Decision Trees (CDT) into a general-purpose, evolving behavioral
 
 **Goal:** Reproduce the original CDT paper's benchmarks to verify the implementation works and establish baselines.
 
-### Tasks
+> **Status note:** We're using Claude from the start (not GPT), so Phase 0 and Phase 1 are partially merged — Claude is the LLM backend during reproduction, not a later migration target.
 
-1. **Environment setup**
-   - Install dependencies with uv
-   - Verify GPU access (CUDA)
-   - Download required models: Qwen3-8B, Qwen3-Embedding-8B, DeBERTa-v3-base-rp-nli
-   - Set up HuggingFace token access
-   - Set up OpenAI API key (for initial reproduction; will swap to Claude later)
+### Phase 0A: Smoke Test — COMPLETE
 
-2. **Data download**
-   - Download Fine-grained Fandom Benchmark action sequences from HuggingFace
-   - Download Bandori Conversational Benchmark action sequences from HuggingFace
-   - Verify data format matches code expectations
+- Kasumi CDT constructed with Claude as LLM backend
+- Results: 26 nodes, 72 statements
+- Verified end-to-end pipeline works
 
-3. **CDT construction reproduction**
-   - Run `build_cdt.sh` for at least 3 characters (e.g., Kasumi, Arisa, Yui)
-   - Compare output CDT structure to paper's reported statistics (node counts, statement counts)
-   - Save constructed CDTs as baseline packages
+### Phase 0B: Full Reproduction — IN PROGRESS
 
-4. **Benchmark reproduction**
-   - Run `run_benchmark.py` for the same characters
+- Arisa CDT construction with depth=3
+- Remaining characters TBD after Arisa completes
+
+### Remaining Tasks
+
+1. **Benchmark reproduction**
+   - Run `run_benchmark.py` for completed characters
    - Compare accuracy metrics to paper's Table 1 and Table 2
    - Document any discrepancies
 
-5. **Wikification reproduction**
+2. **Wikification reproduction**
    - Run wikification notebook on at least 1 character
    - Verify output quality matches paper's examples
 
-6. **Document findings**
+3. **Document findings**
    - Write `artifacts/baseline-results.md` with all reproduction results
    - Note any issues, discrepancies, or gotchas discovered
 
 ### Success Criteria
+- [x] CDT construction runs end-to-end for 1+ character (Kasumi done)
 - [ ] CDT construction runs end-to-end for 3+ characters
 - [ ] Benchmark scores within 5% of paper's reported numbers
 - [ ] Wikification produces readable profiles
 - [ ] All findings documented
 
-## Phase 1: Claude Migration
+## Phase 1: Code Modernization + Claude Migration
 
-**Goal:** Replace OpenAI dependency with Anthropic Claude for all LLM calls.
-
-### Tasks
-
-1. **Swap hypothesis generation** — GPT-4.1 → Claude Sonnet 4.6
-2. **Swap validation** — GPT-4.1-mini → Claude Haiku 4.5 (cheaper) or Sonnet
-3. **Swap wikification** — GPT-4.1 → Claude Sonnet 4.6
-4. **Swap evaluation** — GPT-4.1 → Claude Sonnet 4.6
-5. **Remove exec()** — Replace `exec()` on LLM output with structured JSON parsing
-6. **Re-run benchmarks** — Verify Claude-based CDTs match or exceed GPT-4.1 baselines
-7. **Document findings** — `artifacts/claude-migration-results.md`
-
-### Success Criteria
-- [ ] No OpenAI dependency for core functionality (openai optional extra only)
-- [ ] No exec() in codebase
-- [ ] Benchmark scores within 5% of Phase 0 baselines
-- [ ] All LLM calls use anthropic SDK or claude-code-sdk
-
-## Phase 2: Code Modernization
-
-**Goal:** Restructure into a proper installable Python package.
+**Goal:** Restructure into a proper installable Python package with Claude as the LLM backend.
 
 ### Tasks
 
-1. **Package structure** — Move core logic into `src/canopy/`
-   - `src/canopy/core.py` — CDT_Node class (cleaned up)
-   - `src/canopy/embeddings.py` — Embedding models
-   - `src/canopy/validation.py` — NLI validation
-   - `src/canopy/prompts.py` — All LLM prompts
-   - `src/canopy/traverse.py` — CDT traversal
-   - `src/canopy/wikify.py` — Wikification
-   - `src/canopy/cli.py` — CLI commands
-2. **Remove global state** — Models loaded at module level → dependency injection
-3. **Add type hints** throughout
-4. **Add tests** — Unit tests for core algorithm, traversal, validation
-5. **Add CLI** — `canopy build`, `canopy traverse`, `canopy wikify`, `canopy benchmark`
-6. **Verify installability** — `uv add canopy-ai` from local path works
+1. **Package restructure** — Move core logic into `src/canopy/`
+2. **Remove exec()** — Replace `exec()` on LLM output with structured JSON parsing
+3. **LLM adapter pattern** — Abstract LLM calls behind adapter interface (already started)
+4. **Proper installable package** — `pip install canopy-ai` from local path works, Python >=3.13
+5. **Migrate run_benchmark.py and cdt_profiling.py** — Into package CLI or modules
+6. **Tests** — Unit tests for core algorithm, traversal, validation
 
 ### Success Criteria
 - [ ] `pip install -e .` / `uv sync` works
 - [ ] `import canopy` imports cleanly
-- [ ] All existing functionality preserved
+- [ ] No exec() in codebase
+- [ ] LLM calls go through adapter pattern
+- [ ] run_benchmark.py and cdt_profiling.py migrated
 - [ ] Test coverage >= 80%
 
-## Phase 3: Temporal CDT (T-CDT)
+## Phase 2: Core Library API
 
-**Goal:** Add temporal dimension — newer evidence weighs more, superseded patterns tracked.
+**Goal:** Redesign the core API around behavioral observations and modern clustering.
 
 ### Tasks
 
-1. **Time-weighted validation** — Recent (scene, action) pairs weighted higher during NLI validation
-2. **Supersession tracking** — When new evidence contradicts old patterns, mark old as superseded (not deleted)
-3. **Recency-gated branches** — Gate conditions can include temporal predicates ("since date X")
-4. **Incremental tree growth** — Add new data to existing CDT without full rebuild
-5. **Benchmark against standard CDT** — Does T-CDT improve profile accuracy on evolving data?
+1. **BehavioralObservation as primary input** — Replace SceneActionPair with BehavioralObservation (richer, domain-agnostic)
+2. **HDBSCAN clustering** — Replace KMeans with HDBSCAN (density-based, no predefined k)
+3. **Computed confidence** — Derive confidence from evidence counts, not LLM-assigned scores
+4. **Unified hypothesis pipeline** — Any source (LLM, human, import) feeds the same pipeline
+5. **Two-pass cross-cluster validation** — Validate hypotheses across clusters for consistency
+6. **Traversal API** — Semantic, LLM, and hybrid traversal modes
+
+### Success Criteria
+- [ ] BehavioralObservation is the primary input type
+- [ ] HDBSCAN replaces KMeans
+- [ ] Confidence computed from evidence, not LLM
+- [ ] Cross-cluster validation implemented
+- [ ] Traversal API supports all three modes
+- [ ] Test coverage >= 80%
+
+## Phase 3: T-CDT + Advanced Features
+
+**Goal:** Add temporal dimension, incremental growth, and calibration.
+
+### Tasks
+
+1. **Temporal weighting** — Recent evidence weighs more during validation
+2. **Supersession tracking** — Contradicted patterns marked as superseded (not deleted), with timestamps and reasons
+3. **Incremental tree growth** — 8-step algorithm for adding new data without full rebuild
+4. **Gate calibration** — Calibrate gates using positive and negative examples
+5. **Bootstrap mode** — Cold-start CDT construction from minimal data
+6. **Evaluation framework** — Benchmarks comparing T-CDT vs standard CDT on evolving data
 
 ### Success Criteria
 - [ ] T-CDT produces measurably better profiles on temporally-evolving datasets
-- [ ] Incremental update works without full reconstruction
+- [ ] Incremental update works via 8-step algorithm without full reconstruction
 - [ ] Superseded patterns preserved with timestamps and reasons
+- [ ] Gate calibration from positive/negative examples
+- [ ] Bootstrap mode functional
+- [ ] Evaluation framework produces reproducible results
 
-## Phase 4: Semantic Gates + Domain-Agnostic
+## Phase 4: Paper + Polish
 
-**Goal:** Replace exec()-based gate conditions with semantic embedding gates. Make CDT work for any domain.
-
-### Tasks
-
-1. **Semantic gate format** — Natural language gates with pre-computed embeddings, evaluated via cosine similarity (see canopy-design.md Section 3)
-2. **Deterministic traversal** — No LLM calls at inference time (embedding + cosine only)
-3. **Domain adapters** — Plugin system for different data sources (AI sessions, social media, etc.)
-4. **Delulu integration** — Use canopy as a library in the delulu project
-
-### Success Criteria
-- [ ] Traversal is synchronous, deterministic, no LLM calls
-- [ ] delulu imports canopy and builds CDTs from session cards
-- [ ] At least 2 domain adapters (character RP + user profiling)
-
-## Phase 5: Paper
-
-**Goal:** Write and submit a research paper on Temporal CDT.
+**Goal:** Benchmark, write research paper, and publish the package.
 
 ### Tasks
 
-1. **Experimental design** — Define evaluation protocol for T-CDT vs CDT
-2. **Datasets** — Original CDT benchmarks + new temporal dataset (delulu sessions)
-3. **Baselines** — CDT, PURE, PERSONAMEM approaches
-4. **Writing** — Introduction, Related Work, Method, Experiments, Analysis, Conclusion
+1. **Benchmark evaluation** — Compare canopy T-CDT against original CDT paper results
+2. **Research paper** — Introduction, Related Work, Method, Experiments, Analysis, Conclusion
+3. **Datasets** — Original CDT benchmarks + new temporal dataset (delulu sessions)
+4. **Baselines** — CDT, PURE, PERSONAMEM approaches
 5. **Target venue** — ACL/EMNLP/NeurIPS workshop on personalization or user modeling
+6. **Documentation** — Examples, tutorials, API reference
+7. **PyPI publish** — `pip install canopy-ai` from PyPI
 
 ## Key Research Papers
 
@@ -160,26 +145,4 @@ Extend Codified Decision Trees (CDT) into a general-purpose, evolving behavioral
 
 ## Architecture (Target)
 
-```
-canopy-ai/
-├── src/canopy/
-│   ├── __init__.py
-│   ├── cli.py              # CLI: canopy build, traverse, wikify, benchmark
-│   ├── core.py             # CDTNode, CDTTree — core data structures
-│   ├── builder.py          # CDT construction algorithm
-│   ├── embeddings.py       # Embedding model management
-│   ├── validation.py       # Evidence-based validation (NLI or LLM)
-│   ├── prompts.py          # All LLM prompt templates
-│   ├── traverse.py         # Deterministic CDT traversal
-│   ├── wikify.py           # CDT → human-readable profile
-│   ├── temporal.py         # T-CDT: time weighting, supersession
-│   ├── gates.py            # Semantic gate conditions + embedding-based matching
-│   └── adapters/           # Domain adapters
-│       ├── __init__.py
-│       ├── character.py    # Original CDT: character RP from storylines
-│       └── user_profile.py # Canopy: user behavior from AI sessions
-├── artifacts/              # Design docs, results, plans
-├── tests/                  # Test suite
-├── pyproject.toml          # Package config (uv/hatch)
-└── README.md
-```
+See canopy-design.md Section 11 for the full target architecture and module layout.
