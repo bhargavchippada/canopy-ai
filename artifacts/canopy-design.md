@@ -143,13 +143,14 @@ Root (depth 0)
   ...
 ```
 
-Structure (always 3 levels):
+Structure (4 levels, depth 0-3):
 - **Depth 0:** Root node (global container)
 - **Depth 1:** Cluster nodes (one per discovered domain)
-- **Depth 2:** Gated hypotheses (conditional rules within clusters) and accepted leaf nodes
+- **Depth 2:** Accepted leaf nodes (unconditional within cluster) and gate nodes (conditional)
+- **Depth 3:** Gated leaf nodes (conditional hypotheses under gate nodes)
 - **Rejected hypotheses** stored but marked rejected (for audit, not traversal)
 
-The tree is always 3 levels deep. Deeper trees add complexity without proven value -- can be added later if needed.
+The tree has 4 levels (depth 0-3) as shown in the example above. Deeper trees add complexity without proven value -- can be added later if needed.
 
 ### Step 6: Rules Augmentation (Optional)
 
@@ -260,9 +261,10 @@ The `description` is the primary input. It can be a sentence, a paragraph, or a 
 1. Embed the context description once
 2. Start at the root node
 3. For each cluster node: always enter (clusters are not gated)
-4. For each gate node: evaluate cosine similarity
-   - If similarity >= gate.threshold: enter subtree, collect leaf statements
-   - If similarity < gate.threshold: skip subtree
+4. For each gate node: evaluate gate using calibrated scoring (see Section 3):
+     score = 0.6 * gate_similarity + 0.4 * best_positive_similarity
+   - If score >= gate.threshold: enter subtree, collect leaf statements
+   - If score < gate.threshold: skip subtree
 5. Collect all accepted leaf statements from entered subtrees
 6. Root-level accepted statements are always included (no gate)
 ```
@@ -363,7 +365,7 @@ class SupersessionRecord:
 New data does not require rebuilding the entire CDT. The incremental algorithm:
 
 1. New (scene, action) pairs are embedded
-2. Assign each pair to the nearest existing cluster (by centroid distance)
+2. Compute cluster centroids as the mean of member embeddings (an approximation for HDBSCAN, which does not produce centroids natively). Assign each pair to the cluster with highest cosine similarity to its centroid.
 3. If distance > `new_cluster_threshold` (default: 2x the average intra-cluster distance), flag as a potential new cluster candidate
 4. If 5+ flagged pairs form a dense group (HDBSCAN on flagged pairs with `min_cluster_size`), create a new cluster
 5. Re-validate ALL hypotheses in affected clusters using the updated evidence set (including new pairs)
@@ -657,6 +659,7 @@ class CDTConfig:
     # Clustering
     max_clusters: int = 8
     min_cluster_size: int = 16
+    new_cluster_threshold: float = 2.0  # Multiplier on avg intra-cluster distance for new cluster detection
 
     # Temporal
     time_decay_half_life_days: int = 90
