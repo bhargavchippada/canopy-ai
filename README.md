@@ -7,11 +7,11 @@
 ## Planned Features
 
 - **Temporal CDT (T-CDT)** — Time-weighted validation where newer evidence takes precedence. Superseded patterns are preserved with history, not deleted.
-- **Structured gate predicates** — JSON-based conditions for deterministic, LLM-free traversal at inference time.
+- **Semantic gate conditions** — Embedding-based cosine similarity for fast, deterministic traversal at inference time.
 - **Computed confidence** — Evidence-count based validation (supporting/contradicting/irrelevant), not LLM self-assessed scores.
-- **Claude integration** — Replace OpenAI dependency with Anthropic Claude for hypothesis generation and validation.
+- **Claude integration** — Uses Anthropic Claude for hypothesis generation (OpenAI replaced in Phase 0).
 - **Domain-agnostic** — Works for user behavior profiling, character logic, workflow patterns, and more.
-- **Installable package** — `pip install canopy-ai` / `uv add canopy-ai`
+- **Installable package** — `uv add canopy-ai`
 
 ## Status
 
@@ -120,17 +120,6 @@ The example notebook to wikify CDTs into reader-friendly profiles is provided in
 ## Benchmark Results
 
 See the [original paper](https://arxiv.org/abs/2601.10080) for full benchmark results.
-
-## Citation
-
-```bibtex
-@article{codified_decision_tree,
-  title={Deriving Character Logic from Storyline as Codified Decision Trees},
-  author={Letian Peng, Kun Zhou, Longfei Yun, Yupeng Hou, and Jingbo Shang},
-  journal={arXiv preprint arXiv:2601.10080},
-  year={2026}
-}
-```
 
 ## License
 
