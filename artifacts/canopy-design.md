@@ -78,7 +78,7 @@ Process:
   2. HDBSCAN clustering on embeddings (min_cluster_size, default 16)
      - HDBSCAN auto-discovers the number of clusters from data density — no k required
      - max_clusters serves as a safety cap: if HDBSCAN produces more, merge smallest clusters
-     - Noise points (HDBSCAN label -1) are discarded
+     - Noise points (HDBSCAN label -1): configurable handling (see D11)
   3. Filter: discard clusters with fewer than min_cluster_size items
   4. Label each cluster via LLM: "Given these examples, what domain/theme do they represent?"
 Output: K clusters, each with a label and list of member observations
@@ -86,9 +86,11 @@ Output: K clusters, each with a label and list of member observations
 
 The embedding model is configurable (see Section 10). HDBSCAN is the primary clustering algorithm, auto-discovering cluster count from data density. KMeans is available as a fallback for datasets where HDBSCAN produces too many or too few clusters (e.g., uniformly distributed embeddings). The clustering interface allows substitution of any algorithm.
 
-### Step 2: Per-Cluster Hypothesis Generation
+### Step 2: Hypothesis Generation (Unified Pipeline)
 
-For each cluster, the LLM generates candidate behavioral hypotheses -- testable statements about patterns in the data.
+Hypotheses come from multiple sources, all producing the same `Hypothesis` dataclass (see D12, D15). The CDT algorithm validates them all identically regardless of origin.
+
+**Tier 1: Cluster hypotheses (CDT core).** For each cluster, the LLM generates candidate behavioral hypotheses -- testable statements about patterns in the data.
 
 ```
 Input:  Cluster label + member BehavioralObservation items
@@ -96,18 +98,28 @@ Process:
   LLM prompt: "Given these behavioral observations from the domain '{label}',
   extract testable behavioral hypotheses. Each hypothesis should be specific
   enough to validate against new evidence."
-Output: List of hypotheses per cluster
+Output: List of hypotheses per cluster (source_type = CLUSTER)
 ```
+
+**Tier 2: Session-level hypotheses (see D10).** Pre-extracted summaries (e.g., session card `user_preferences`) serve as additional hypothesis candidates (source_type = SESSION_CARD).
+
+**Additional sources (see D12):** Rules, documents, and manual hypotheses can also feed the pipeline (source_type = RULE, DOCUMENT, MANUAL). All sources merge, deduplicate (embedding cosine similarity > 0.90 = duplicate), then proceed to validation.
 
 Each hypothesis includes:
 - `statement`: The testable behavioral claim
-- `cluster_id`: Which cluster it belongs to
+- `source_type`: Origin of the hypothesis (CLUSTER, SESSION_CARD, RULE, DOCUMENT, MANUAL)
+- `source_ref`: Provenance reference
+- `cluster_id`: Which cluster it belongs to (if source_type is CLUSTER)
 - `source_ids`: Which input pairs contributed to it
 - `gate_condition`: Natural language condition (null if universal) -- see Section 3
 
-### Step 3: Evidence-Based Validation
+### Step 3: Two-Pass Cross-Cluster Validation
 
-Each hypothesis is validated against evidence items (the original observations from that cluster, or a sampled subset for large clusters).
+Validation follows the CDT paper's two-pass approach to catch cross-cluster contradictions (see D9):
+
+**Pass 1: Global validation.** Each hypothesis is tested against ALL observations (all clusters + noise). If confidence >= `cdt_accept_threshold` → ROOT (universal). If confidence <= `cdt_reject_threshold` → REJECTED. If between → Pass 2.
+
+**Pass 2: Conditional validation.** Observations are filtered by gate semantic similarity to the hypothesis's gate condition. The hypothesis is validated against this filtered evidence set. If confidence >= `cdt_accept_threshold` → GATED rule. Otherwise → REJECTED.
 
 The LLM classifies each evidence item as one of three binary verdicts:
 - **supports** -- evidence FOR the hypothesis
@@ -381,15 +393,15 @@ class SupersessionRecord:
 
 ### Incremental Tree Growth
 
-New data does not require rebuilding the entire CDT. The incremental algorithm:
+New data does not require rebuilding the entire CDT. The 8-step incremental update algorithm (see D14):
 
-1. New observations are embedded
-2. Compute cluster centroids as the mean of member embeddings (an approximation for HDBSCAN, which does not produce centroids natively). Assign each observation to the cluster with highest cosine similarity to its centroid.
-3. If distance > `new_cluster_threshold` (default: 2x the average intra-cluster distance), flag as a potential new cluster candidate
-4. If 5+ flagged observations form a dense group (HDBSCAN on flagged observations with `min_cluster_size`), create a new cluster
+1. Embed new observations
+2. Assign to existing clusters by centroid similarity (centroid = mean of member embeddings, an approximation for HDBSCAN which does not produce centroids natively)
+3. If distance > `new_cluster_threshold` (default: 2x avg intra-cluster distance) → flag as potential new cluster candidate
+4. If 5+ flagged observations form a dense group (HDBSCAN on flagged observations with `min_cluster_size`) → create new cluster
 5. Re-validate ALL hypotheses in affected clusters using the updated evidence set (including new observations)
-6. If `temporal_confidence` of any hypothesis drops below `cdt_reject_threshold` --> supersede (see Supersession Tracking above)
-7. If new clusters were formed --> run hypothesis generation + validation on them
+6. Prescriptive hypotheses (from bootstrap mode, see D13) that now have evidence: confidence rises (confirmed) or drops (superseded)
+7. Generate + validate new hypotheses from new/changed clusters
 8. **Full rebuild trigger:** when > 30% of clusters are new, or > 50% of hypotheses have changed status, trigger a full CDT rebuild instead of incremental update
 
 ---
@@ -406,17 +418,19 @@ Raw data --> Extract hypotheses --> Validate hypotheses (against same raw data)
 
 Standard CDT does both extraction and validation from the same raw data. This is expensive: the LLM must process all raw observations twice.
 
-### Two-Layer Flow
+### Two-Layer Flow (Approach C — see D10)
 
 ```
-Layer 1 (summaries) --> Extract hypotheses (cheap -- summaries are pre-extracted)
-Layer 2 (raw data)  --> Validate hypotheses (targeted -- only relevant evidence)
+Layer 1 (summaries) --> Seed hypotheses (cheap -- summaries are pre-extracted)
+Layer 2 (raw data)  --> Validate ALL hypotheses (targeted -- only relevant evidence)
 ```
+
+Session-level observations seed hypotheses; interaction-level observations are the evidence. Both tiers of hypotheses (cluster-derived + session-card-derived) are deduplicated then validated against interaction observations.
 
 ### How It Works
 
-- **Layer 1 (hypotheses):** Pre-extracted behavioral statements from upstream summarization. These serve as candidate hypotheses. In the CDT paper's terms, these are the "storyline summaries" from which character traits are hypothesized.
-- **Layer 2 (validation):** Raw evidence items for validating or rejecting those hypotheses. Each item is classified as supporting, contradicting, or irrelevant.
+- **Layer 1 (hypothesis seeds):** Pre-extracted behavioral statements from upstream summarization (e.g., session card `user_preferences`). These serve as additional hypothesis candidates alongside cluster-derived hypotheses. In the CDT paper's terms, these are the "storyline summaries" from which character traits are hypothesized.
+- **Layer 2 (validation evidence):** Raw evidence items (interaction observations) for validating or rejecting ALL hypotheses regardless of source. Each item is classified as supporting, contradicting, or irrelevant.
 
 ### Why This Is More Efficient
 
@@ -475,9 +489,14 @@ Irrelevant items are excluded. If there is no relevant evidence (supporting + co
 | <= `cdt_reject_threshold` (0.50) | Rejected | Stored but not traversed (0.50 exactly is rejected) |
 | `(0.50, 0.75)` exclusive | Conditional | Gated subtree |
 
-### Per-Cluster Validation
+### Two-Pass Cross-Cluster Validation (see D9)
 
-Each cluster's hypotheses are validated against evidence matching that cluster's embedding neighborhood -- not against all evidence globally. This is semantically correct: debugging hypotheses should be validated against debugging evidence, not architecture evidence.
+Validation follows a global-then-conditional two-pass approach identical to the CDT paper's method:
+
+- **Pass 1 (Global):** Each hypothesis is tested against ALL observations across all clusters and noise. High-confidence hypotheses become ROOT (universal). Low-confidence hypotheses are REJECTED. Intermediate hypotheses proceed to Pass 2.
+- **Pass 2 (Conditional):** Observations are filtered by semantic similarity to the hypothesis's gate condition. The hypothesis is validated against this filtered evidence set. If it passes → GATED rule. Otherwise → REJECTED.
+
+This catches cross-cluster contradictions: a hypothesis that looks valid within its cluster may be contradicted by evidence in other clusters.
 
 For clusters with too many matching evidence items, the top N items (by quality or recency) are sampled. Default N = 500, configurable via `cdt_max_validation_items`.
 
@@ -574,6 +593,15 @@ class DomainAdapter(ABC):
         If None is returned, standard single-layer CDT is used.
         """
         return None
+
+    def additional_hypotheses(self) -> list[Hypothesis] | None:
+        """Optional: provide additional hypotheses from domain-specific sources.
+
+        Adapters can supply hypotheses from rules, documents, or other sources
+        (see D12 unified hypothesis pipeline). These are merged with cluster
+        and session-card hypotheses, deduplicated, and validated by the CDT.
+        """
+        return None
 ```
 
 ### Character RP Adapter (Original CDT Use Case)
@@ -653,6 +681,27 @@ All CDT-specific configuration values with defaults and valid ranges.
 | `min_cluster_size` | 16 | 2-100 | HDBSCAN min_cluster_size parameter; also used as min items to form a valid cluster |
 | `new_cluster_threshold` | (auto) | -- | Distance threshold for flagging new clusters during incremental growth (default: 2x average intra-cluster distance) |
 
+### Noise Handling Parameters
+
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `noise_mode` | `"validate_only"` | `"discard"`, `"validate_only"`, `"appendix"` | How HDBSCAN noise points are handled (see D11) |
+
+### Hypothesis Source Parameters
+
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `use_cluster_hypotheses` | true | -- | Generate hypotheses from clusters (CDT core) |
+| `use_session_cards` | true | -- | Extract hypotheses from session card summaries (D10) |
+| `use_rules` | true | -- | Extract hypotheses from rules files (D12) |
+| `rules_paths` | [] | -- | Paths to rules files for hypothesis extraction |
+| `use_documents` | false | -- | Extract hypotheses from documents (D12) |
+| `document_paths` | [] | -- | Paths to documents for hypothesis extraction |
+| `manual_hypotheses` | [] | -- | Manual hypothesis strings to inject |
+| `bootstrap_confidence` | 0.5 | 0.0-1.0 | Confidence for unvalidated prescriptive hypotheses (D13) |
+| `require_validation` | false | -- | If true, reject unvalidated hypotheses at traversal time |
+| `dedup_similarity_threshold` | 0.90 | 0.8-1.0 | Cosine similarity threshold for hypothesis deduplication (D10) |
+
 ### Temporal Parameters
 
 | Parameter | Default | Range | Description |
@@ -682,6 +731,19 @@ class CDTConfig:
     max_clusters: int = 8
     min_cluster_size: int = 16
     new_cluster_threshold: float = 2.0  # Multiplier on avg intra-cluster distance for new cluster detection
+    noise_mode: str = "validate_only"  # "discard", "validate_only", "appendix" (D11)
+
+    # Hypothesis sources (D12, D16)
+    use_cluster_hypotheses: bool = True
+    use_session_cards: bool = True
+    use_rules: bool = True
+    rules_paths: list[str] = field(default_factory=list)
+    use_documents: bool = False
+    document_paths: list[str] = field(default_factory=list)
+    manual_hypotheses: list[str] = field(default_factory=list)
+    bootstrap_confidence: float = 0.5  # For unvalidated prescriptive hypotheses (D13)
+    require_validation: bool = False  # Reject unvalidated hypotheses at traversal time
+    dedup_similarity_threshold: float = 0.90  # Cosine sim for hypothesis deduplication (D10)
 
     # Temporal
     time_decay_enabled: bool = True
@@ -704,6 +766,8 @@ class CDTConfig:
                 f"Minimum gap between thresholds must be >= 0.15, got {gap:.2f}. "
                 f"accept={self.cdt_accept_threshold}, reject={self.cdt_reject_threshold}"
             )
+        if self.noise_mode not in ("discard", "validate_only", "appendix"):
+            raise ValueError(f"noise_mode must be 'discard', 'validate_only', or 'appendix', got '{self.noise_mode}'")
 ```
 
 ---
@@ -768,7 +832,43 @@ traverse.py
 
 ---
 
-## 12. Design Decisions Log
+## 12. Bootstrap Mode (see D13)
+
+Bootstrap mode enables CDT construction from rules, documents, and style guides when zero session history is available.
+
+### How It Works
+
+1. Prescriptive hypotheses are extracted from rules files, documents, and manual entries (source_type = RULE, DOCUMENT, MANUAL)
+2. With no interaction evidence, hypotheses are accepted at `bootstrap_confidence` (default 0.5) with `validation_status: "unvalidated"`
+3. As sessions accumulate, prescriptive hypotheses are incrementally validated against real evidence (D14 step 6)
+4. Lifecycle: **prescriptive (day 0)** → **partially validated (day 7)** → **evidence-based (day 90)**
+
+### Prescriptive vs Evidence-Based
+
+| Aspect | Prescriptive (bootstrap) | Evidence-Based (validated) |
+|--------|-------------------------|---------------------------|
+| Source | Rules, docs, manual | Cluster observations, session cards |
+| Initial confidence | `bootstrap_confidence` (0.5) | Computed from verdicts |
+| validation_status | `"unvalidated"` | `"validated"` |
+| Behavior | Applied but flagged as assumed | Applied with full confidence |
+| Evolution | Confirmed or superseded by evidence | Standard T-CDT lifecycle |
+
+### Configuration
+
+- `bootstrap_confidence: float = 0.5` — confidence assigned to unvalidated prescriptive hypotheses
+- `require_validation: bool = False` — if True, reject unvalidated hypotheses at traversal time
+
+### Rejected Rules Are Valuable
+
+When a rule is contradicted by observed behavior, the rejection itself is informative: "Rule says TDD, but user writes code first 65% of the time." These rejected prescriptive hypotheses are preserved in the CDT for audit.
+
+### Paper Angle (see D17)
+
+"From Guidelines to Behavior: How Prescriptive Rules Evolve into Evidence-Based Decision Trees Through Incremental User Observation." This prescriptive → validated lifecycle is novel — no existing system (PURE, PERSONAMEM, original CDT) supports this.
+
+---
+
+## 13. Design Decisions Log
 
 Decisions made during design discussions, with rationale.
 
@@ -820,9 +920,122 @@ Decisions made during design discussions, with rationale.
 
 **Rationale:** LLM-generated confidence floats are unreliable (PERSONAMEM finding). Computed evidence (`supporting / (supporting + contradicting)`) from binary verdicts is strictly more trustworthy. This reinforces the principle throughout the system: computed evidence > LLM self-assessment. Phase 3's quality filtering should use tag-based origin detection rather than `source_confidence`.
 
+### D9: Cross-cluster validation follows CDT paper's two-pass approach
+
+**Decision:** Validation uses a global-then-conditional two-pass approach identical to the CDT paper.
+
+- **Pass 1 (Global):** Test each hypothesis against ALL observations (all clusters + noise). If confidence >= `cdt_accept_threshold` → ROOT (universal). If confidence <= `cdt_reject_threshold` → REJECTED. If between → Pass 2.
+- **Pass 2 (Conditional):** Filter observations by gate semantic similarity, validate against filtered set. If confidence >= `cdt_accept_threshold` → GATED rule. Otherwise → REJECTED.
+
+**Rationale:** Catches cross-cluster contradictions. A hypothesis that looks valid within its cluster may be contradicted by evidence in other clusters. This is identical to the CDT paper's approach.
+
+### D10: Session-level observations as hypothesis seeds (Approach C)
+
+**Decision:** Two tiers of hypothesis sources:
+- **Tier 1:** Interaction observations → cluster → hypothesize (CDT core)
+- **Tier 2:** Session card `user_preferences` → extract as additional hypothesis candidates
+
+All hypotheses (Tier 1 + Tier 2) are deduplicated then validated against interaction observations. Session observations seed hypotheses; interaction observations are the evidence.
+
+**Deduplication:** Embedding cosine similarity > 0.90 = duplicate. Merge and combine sources.
+
+**Rationale:** Session cards capture high-level behavioral patterns that may not emerge from individual interaction clustering. Using them as hypothesis seeds (not evidence) leverages their compression while maintaining interaction-level validation rigor.
+
+### D11: Noise observations used as validation evidence (VALIDATE_ONLY mode)
+
+**Decision:** Three configurable modes for HDBSCAN noise points (label -1):
+- `DISCARD` — noise observations are ignored entirely
+- `VALIDATE_ONLY` (default) — noise observations validate/contradict hypotheses but don't generate new ones
+- `APPENDIX` — noise observations are included in wikification as uncategorized data
+
+**Rationale:** VALIDATE_ONLY provides contrarian evidence without pattern-matching on outliers. Noise observations may contain edge cases that contradict otherwise-accepted hypotheses, strengthening the validation signal.
+
+### D12: Unified hypothesis pipeline — any source can produce hypotheses
+
+**Decision:** All hypothesis sources produce the same `Hypothesis` dataclass with `source_type` (see D15). Sources: `CLUSTER` (CDT core), `SESSION_CARD`, `RULE`, `DOCUMENT`, `MANUAL`. All sources merge → deduplicate → two-pass validation → build tree. CDT doesn't care where hypotheses come from — it validates them all against evidence.
+
+**Rationale:** Rules and third-party docs become hypotheses validated against actual user behavior. Rejected rules are valuable: "Rule says TDD, but user writes code first 65% of the time." This unification simplifies the pipeline — one validation path for all hypothesis types.
+
+### D13: Bootstrap mode — CDT from rules/docs with zero sessions
+
+**Decision:** New users with no session history can bootstrap CDT from rules, docs, and style guides. Prescriptive hypotheses are accepted at `bootstrap_confidence` (default 0.5) with `validation_status: "unvalidated"`. As sessions accumulate, prescriptive hypotheses get validated incrementally. See Section 12 for full details.
+
+**Lifecycle:** prescriptive (day 0) → partially validated (day 7) → evidence-based (day 90).
+
+**Configuration:**
+- `bootstrap_confidence: float = 0.5`
+- `require_validation: bool = False` — if True, reject unvalidated hypotheses at traversal time
+
+**Rationale:** Cold start is a real problem. Users shouldn't wait for 50+ sessions before the CDT is useful. Bootstrap provides immediate value from existing rules while maintaining the evidence-based validation guarantee as data accumulates.
+
+### D14: Incremental update algorithm (8 steps)
+
+**Decision:** The 8-step incremental update algorithm (documented in Section 5):
+
+1. Embed new observations
+2. Assign to existing clusters (by centroid similarity — centroid = mean of member embeddings, approximation for HDBSCAN)
+3. If distance > `new_cluster_threshold` (2x avg intra-cluster distance) → flag as potential new cluster
+4. If 5+ flagged observations form dense group (HDBSCAN) → new cluster
+5. Re-validate ALL hypotheses in affected clusters using updated evidence set
+6. Prescriptive hypotheses that now have evidence: confidence rises (confirmed) or drops (superseded)
+7. Generate + validate new hypotheses from new/changed clusters
+8. Full rebuild trigger: >30% clusters new OR >50% hypotheses changed status
+
+**Rationale:** Centroid-based assignment is an approximation (HDBSCAN doesn't produce centroids natively), but it's computationally efficient for incremental updates. Step 6 explicitly handles the bootstrap → evidence-based lifecycle from D13. The full rebuild trigger prevents drift from accumulating too many incremental patches.
+
+### D15: HypothesisSource enum and Hypothesis dataclass
+
+**Decision:** Standardized data structures for the unified hypothesis pipeline:
+
+```python
+class HypothesisSource(Enum):
+    CLUSTER = "cluster"
+    SESSION_CARD = "session_card"
+    RULE = "rule"
+    DOCUMENT = "document"
+    MANUAL = "manual"
+
+@dataclass
+class Hypothesis:
+    statement: str
+    gate_condition: str | None
+    source_type: HypothesisSource
+    source_ref: str
+    confidence: float  # computed from evidence, or bootstrap_confidence if unvalidated
+    validation_status: str  # "validated" | "unvalidated" | "superseded"
+    supporting_count: int
+    contradicting_count: int
+```
+
+**Rationale:** All hypothesis sources produce the same structure. `source_type` tracks provenance for audit and lifecycle management. `validation_status` distinguishes bootstrap prescriptive hypotheses from evidence-based ones.
+
+### D16: CDTBuilderConfig for hypothesis sources
+
+**Decision:** Configuration for controlling which hypothesis sources are active:
+
+```python
+use_cluster_hypotheses: bool = True
+use_session_cards: bool = True
+use_rules: bool = True
+rules_paths: list[str] = []
+use_documents: bool = False
+document_paths: list[str] = []
+manual_hypotheses: list[str] = []
+bootstrap_confidence: float = 0.5
+require_validation: bool = False
+```
+
+**Rationale:** Granular control over hypothesis sources. Default configuration enables cluster + session card + rules (the most common setup). Documents and manual hypotheses are opt-in. `require_validation` provides a safety valve for users who don't want unvalidated prescriptive hypotheses in their CDT output.
+
+### D17: Paper angle for bootstrap → evidence evolution
+
+**Decision:** Research contribution: "From Guidelines to Behavior: How Prescriptive Rules Evolve into Evidence-Based Decision Trees Through Incremental User Observation."
+
+**Rationale:** The lifecycle of prescriptive (day 0) → partially validated (day 7) → evidence-based (day 90) is novel. No existing system (PURE, PERSONAMEM, original CDT) supports bootstrapping from prescriptive rules and incrementally validating them against observed behavior. This is a publishable contribution.
+
 ---
 
-## 13. Research References
+## 14. Research References
 
 | Paper | ArXiv ID | Key Contribution to Canopy |
 |-------|----------|---------------------------|
@@ -842,7 +1055,8 @@ Decisions made during design discussions, with rationale.
 | Confidence | NLI entailment scores | Programmatic: supporting/(supporting+contradicting) |
 | Temporal awareness | None | T-CDT: time decay, supersession tracking |
 | Input format | (scene, action) pairs | BehavioralObservation (single text); SceneActionPair as adapter convenience |
-| Hypothesis source | Extracted from raw data | Two-layer: summaries (hypotheses) + raw (validation) |
+| Hypothesis source | Extracted from raw data | Unified pipeline: clusters + session cards + rules + docs + manual (D12) |
+| Bootstrap | None | Prescriptive hypotheses from rules/docs, validated incrementally (D13) |
 | Clustering | Predefined character traits | Embedding-based HDBSCAN (auto-discovers structure and cluster count) |
 | Traversal | `exec()` gate evaluation | Cosine similarity (no code execution) |
 
