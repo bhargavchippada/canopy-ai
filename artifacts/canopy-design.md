@@ -1033,6 +1033,77 @@ require_validation: bool = False
 
 **Rationale:** The lifecycle of prescriptive (day 0) → partially validated (day 7) → evidence-based (day 90) is novel. No existing system (PURE, PERSONAMEM, original CDT) supports bootstrapping from prescriptive rules and incrementally validating them against observed behavior. This is a publishable contribution.
 
+### D18: Sidekick runtime — wikified profile as system prompt + active traversal
+
+**Decision:** Two-phase delivery of CDT profile to the Sidekick:
+- **v1:** Full wikified profile injected as system prompt. Simpler, more reliable.
+- **v2:** Active traversal at key events (commits, schema changes, completion claims, error reports) for timely reinforcement of relevant rules.
+
+Both needed long-term because LLMs drift from system prompt instructions as context grows.
+
+**Rationale:** System prompt injection is the simplest reliable delivery mechanism — no infrastructure needed. But as conversations grow, LLMs attend less to system prompt content. Active traversal at key events re-surfaces the most relevant rules exactly when they matter, counteracting context drift.
+
+### D19: Hybrid wikification — per-section generation + synthesis pass
+
+**Decision:** Wikification uses a two-stage process:
+1. **Per-section generation:** Each cluster's section is generated independently (parallelizable, individually evaluable).
+2. **Synthesis pass:** One LLM call generates the intro summary + cross-cutting observations from the assembled sections.
+
+Per-section failure can be retried without redoing the entire profile.
+
+**Rationale:** Independent per-section generation enables parallel execution and granular retry. A single monolithic wikification call risks losing the entire profile if the LLM fails partway through. The synthesis pass adds coherence and cross-cutting observations that per-section generation cannot produce in isolation.
+
+### D20: No observation quality filtering — all observations are behavioral evidence
+
+**Decision:** Do not pre-filter observations before CDT construction. All observations — including "generic" ones (simple questions, terse approvals) — are fed to the pipeline.
+
+**Rationale:** "Generic" observations represent the user's dominant behavior mode. The Sidekick needs to emulate routine behavior, not just dramatic moments. Filtering out routine interactions would bias the CDT toward exceptional behavior and miss the baseline patterns. HDBSCAN naturally handles true outliers via its noise label (-1). Pre-filtering adds a subjective quality judgment that undermines the evidence-based approach.
+
+### D21: Keep gates specific — let embedding similarity handle soft matching
+
+**Decision:** Do not generalize gate conditions after generation. Gates remain as specific as the LLM produces them.
+
+**Rationale:** Specific gates that don't match a context = safe failure (the rule simply doesn't fire). Over-generalized gates = noisy false matches (the rule fires when it shouldn't). The embedding-based cosine similarity already provides soft matching — a gate like "When debugging async race conditions" will partially match "When debugging concurrency issues" without needing to be manually broadened. Specificity is the safe default.
+
+### D22: Slim wikified profile for runtime, full evidence in DB
+
+**Decision:** Two-tier profile architecture:
+- **Runtime profile (~10-15K tokens):** Rules with confidence scores, no evidence links. Injected as system prompt.
+- **Full evidence (DB):** Detailed profile with evidence chains, queryable on-demand ("why do you think I prefer X?").
+
+**Rationale:** System prompt budget is finite. A 10-15K token profile leaves room for conversation context. Evidence links are valuable for human review and explainability but would bloat the runtime profile. The DB-backed full profile supports transparency ("show me the evidence") without runtime cost.
+
+### D23: All evaluation modes implemented independently
+
+**Decision:** Four evaluation modes, each producing independent scores:
+- **Scenarios:** 6 automated test cases with known-correct outputs.
+- **Holdout:** 80/20 prediction test — can the CDT predict behavior on held-out sessions?
+- **Contradictions:** Adversarial detection — does the CDT contain self-contradicting rules?
+- **Review:** Human annotation document for manual assessment.
+
+Each mode can be run independently or in any combination. CLI: `delulu eval --mode scenarios|holdout|contradictions|review`.
+
+**Rationale:** Independent evaluation modes avoid coupling between assessment methods. A CDT that scores well on holdout prediction but poorly on contradiction detection reveals a different class of problem than one that fails both. Running modes independently also enables incremental evaluation during development.
+
+### D24: Default embedding model all-MiniLM-L6-v2
+
+**Decision:** Default embedding model is `all-MiniLM-L6-v2` (80MB, fast, offline). Configurable via `embedding_model` config.
+
+**Rationale:** Good enough for natural language behavioral summaries. Small model size enables offline operation and fast embedding. Code-aware models (e.g., `code-search-ada`) are available as overrides for code-heavy domains but are not the default — most behavioral observations are natural language descriptions, not raw code.
+
+### D25: Workflow sequences handled implicitly through gate conditions
+
+**Decision:** No separate `WorkflowPattern` concept. Gates handle workflow-aware behavior through phase-aware conditions.
+
+Examples:
+- "When user has asked 3+ clarifying questions on same topic" → transition to planning
+- "When in research phase" → expect exploratory questions
+- "When user claims completion" → trigger verification
+
+Traversal context includes session phase, interaction count, and recent interaction types.
+
+**Rationale:** Introducing a separate workflow sequence concept adds a parallel system alongside gates. Gates are already capable of encoding phase awareness through natural language conditions. The traversal context provides the structured metadata (interaction count, phase) that gates can reference via embedding similarity. Adding a dedicated workflow system is premature — gates should be proven insufficient first.
+
 ---
 
 ## 14. Research References
