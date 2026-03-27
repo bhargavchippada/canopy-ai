@@ -8,8 +8,8 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 
 ## Current Phase
 
-**Phase 0: Baseline Reproduction** — Reproducing original CDT benchmarks.
-**Next:** Phase 1 (Claude migration) — only after Phase 0 passes all success criteria.
+**Phase 0: Baseline Reproduction** — Reproducing original CDT benchmarks with Claude (not GPT).
+**Next:** Phase 1 (full migration) — only after Phase 0 passes all success criteria.
 
 ## Principles
 
@@ -24,11 +24,28 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 
 - **Language:** Python 3.11+
 - **Package manager:** uv (NEVER pip)
-- **LLM:** Anthropic Claude (replacing OpenAI from original CDT)
-- **Embeddings:** Qwen3-8B (scene), Qwen3-Embedding-8B (action)
+- **LLM:** Claude via claude-agent-sdk (Max subscription, no API key)
+- **LLM Model:** claude-sonnet-4-6 (default)
+- **Embeddings:** Qwen3-0.6B (smoke test) / Qwen3-8B (full run)
 - **NLI:** DeBERTa-v3-base-rp-nli
 - **Testing:** pytest
 - **Linting:** ruff
+
+## LLM Adapter
+
+All LLM calls go through `llm.py` adapter interface:
+
+```python
+from llm import generate, ClaudeCodeAdapter, set_adapter
+
+# Default: uses ClaudeCodeAdapter with claude-sonnet-4-6
+result = generate("prompt here")
+
+# Swap adapter at runtime
+set_adapter(ClaudeCodeAdapter(default_model="claude-opus-4-6"))
+```
+
+See `artifacts/llm-adapters.md` for provider comparison.
 
 ## Key Commands
 
@@ -36,20 +53,60 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 uv sync                    # Install dependencies
 uv run pytest              # Run tests
 uv run ruff check .        # Lint
+
+# CDT construction (smoke test with 0.6B models)
+uv run python codified_decision_tree.py \
+  --character Kasumi \
+  --surface_embedder_path ~/models/Qwen3-Embedding-0.6B \
+  --generator_embedder_path ~/models/Qwen3-0.6B \
+  --device_id 0
+
+# CDT construction (full run with 8B models — needs sequential loading)
+# TODO: implement sequential model loading for 32GB VRAM
 ```
+
+## Model Paths
+
+Models stored in `~/models/`:
+
+| Model | Path | Size | Status |
+|-------|------|------|--------|
+| DeBERTa NLI | `~/models/deberta-v3-base-rp-nli` | 715MB | Downloaded |
+| Qwen3-Embedding-0.6B | `~/models/Qwen3-Embedding-0.6B` | ~1.2GB | Downloaded |
+| Qwen3-0.6B | `~/models/Qwen3-0.6B` | ~1.2GB | Downloaded |
+| Qwen3-Embedding-8B | `~/models/Qwen3-Embedding-8B` | ~16GB | Downloading |
+| Qwen3-8B | `~/models/Qwen3-8B` | ~16GB | Downloading |
+| Llama-3.1-8B-Instruct | `~/models/Llama-3.1-8B-Instruct` | ~16GB | Needs HF login (gated) |
+
+**VRAM Note (RTX 5090, 32GB):** Cannot load DeBERTa + Qwen3-8B + Qwen3-Embedding-8B simultaneously (~35GB). Use 0.6B models for smoke testing. Full 8B run requires sequential model loading (not yet implemented).
 
 ## Project Structure
 
 ```
 canopy-ai/
-├── src/canopy/            # Package source (target structure)
-├── artifacts/             # Design docs, results
-├── tests/                 # Test suite
-├── codified_decision_tree.py  # Original CDT implementation (Phase 0)
-├── run_benchmark.py       # Original benchmark runner (Phase 0)
-├── cdt_profiling.py       # Original profiling script (Phase 0)
+├── llm.py                     # LLM adapter interface (Protocol + ClaudeCodeAdapter)
+├── constant.py                # Env vars (gitignored)
+├── codified_decision_tree.py  # CDT construction (migrated to Claude)
+├── run_benchmark.py           # Benchmark runner (NOT YET MIGRATED — Phase 1)
+├── cdt_profiling.py           # Profiling/wikification (NOT YET MIGRATED — Phase 1)
+├── build_cdt.sh               # Shell wrapper for CDT construction
+├── artifacts/                 # Design docs, results
+│   ├── initial-plan.md
+│   ├── phase0-phase1-prd.md
+│   └── llm-adapters.md
+├── data/                      # Cached HF datasets (gitignored)
+├── packages/                  # Output CDT packages (gitignored)
+├── profiles/                  # Wikified profiles (gitignored)
+├── src/canopy/                # Package source (Phase 2)
+├── tests/                     # Test suite
 └── pyproject.toml
 ```
+
+## Known Issues
+
+- `run_benchmark.py` and `cdt_profiling.py` still import from OpenAI — will crash until Phase 1 migration
+- `cdt_profiling.py` still has `exec()` on LLM output — Phase 1 will fix
+- Llama-3.1-8B-Instruct requires HF login for download (gated model)
 
 ## Conventions
 
@@ -57,7 +114,8 @@ canopy-ai/
 - Type hints everywhere
 - Immutable data structures preferred
 - No exec() or eval() on LLM output — structured JSON parsing only
-- All LLM calls use Anthropic Claude (after Phase 1 migration)
+- All LLM calls route through `llm.py` adapter (never direct API calls)
+- All LLM calls use Claude via claude-agent-sdk (Max subscription)
 
 ## Attribution
 

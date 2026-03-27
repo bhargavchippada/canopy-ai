@@ -1,20 +1,16 @@
 import os
-import openai
-import re, json, jsonlines, pickle
+import re, json, pickle
 import numpy as np
 import torch
 import torch.nn.functional as F
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForSequenceClassification
 from collections import defaultdict
-from constant import openai_key
 from copy import deepcopy
 from datasets import load_dataset
-from nltk import word_tokenize, sent_tokenize
-from collections import Counter, defaultdict
-from tqdm import tqdm    
+from tqdm import tqdm
 from sklearn.cluster import KMeans
-from openai import OpenAI
+from llm import generate as llm_generate, extract_json
 
 # character = "Kasumi"
 # engine = "gpt-4.1"
@@ -40,7 +36,7 @@ def build_arg_parser():
     parser.add_argument(
         "--engine",
         type=str,
-        default="gpt-4.1",
+        default="claude-sonnet-4-6",
         help="LLM engine name"
     )
 
@@ -94,7 +90,7 @@ def build_arg_parser():
     parser.add_argument(
         "--device_id",
         type=int,
-        default=1,
+        default=0,
         help="CUDA device id"
     )
 
@@ -118,12 +114,11 @@ device_id = args.device_id
 
 device = torch.device(f"cuda:{device_id}")
 
-openai.api_key = openai_key
-client = OpenAI(api_key=openai_key)
-
-all_characters = json.load(open("all_characters.json"))
+with open("all_characters.json") as f:
+    all_characters = json.load(f)
 character2artifact = {character:artifact for artifact in all_characters for character in all_characters[artifact]["major"]}
-band2members = json.load(open("band2members.json"))
+with open("band2members.json") as f:
+    band2members = json.load(f)
 leave_bar = True
 
 surface_tokenizer = AutoTokenizer.from_pretrained(surface_embedder_path)
@@ -139,19 +134,8 @@ classifier = AutoModelForSequenceClassification.from_pretrained(discriminator_pa
 classifier = classifier.to(device)
 
 def generate(prompt, engine=engine):
+    return llm_generate(prompt, model=engine)
 
-    response = client.responses.create(
-        model=engine,
-        temperature=1e-8,
-        input=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-    ).output_text
-
-    return response
 
 def load_ar_pairs(character):
 
@@ -169,10 +153,12 @@ def load_ar_pairs(character):
             if data["artifact"] == artifact:
                 title2action_series[data["title"]].append(data)
 
-        json.dump(title2action_series, open(f"data/title2action_series.{artifact}.json", "w"))
+        with open(f"data/title2action_series.{artifact}.json", "w") as f:
+            json.dump(title2action_series, f)
 
     else:
-        title2action_series = json.load(open(f"data/title2action_series.{artifact}.json"))
+        with open(f"data/title2action_series.{artifact}.json") as f:
+            title2action_series = json.load(f)
 
     all_actions = []
     pairs = []
@@ -302,21 +288,22 @@ To do this, please propose hypotheses for the general behavior logic of {charact
 - Focus on the **next action** when asking! Don't ask whether certain event is involved, instead ask whether the scene might trigger potential behavior for {character}'s **next action**.
 - Directly include "{character}'s next action" in the question!
 
-4. Output the hypothesized scene-action triggers in the following format:
-```python
-action_hypotheses = [] # A list of syntactically complete statements (always mentioning {character})
-scene_check_hypotheses = [] # A list of syntactically complete questions to check the given scene (always mentioning {character})
+4. Output the hypothesized scene-action triggers in the following JSON format:
+```json
+{{
+  "action_hypotheses": [],
+  "scene_check_hypotheses": []
+}}
 ```
+Where action_hypotheses is a list of syntactically complete statements (always mentioning {character})
+and scene_check_hypotheses is a list of syntactically complete questions to check the given scene (always mentioning {character}).
 '''
 
     response = generate(prompt)
 
-    code_str = re.findall("```python(.*?)```", response, re.DOTALL)[0].strip()
-    local_vars = {}
-    exec(code_str, globals(), local_vars)
-
-    action_hypotheses = local_vars["action_hypotheses"]
-    scene_check_hypotheses = local_vars["scene_check_hypotheses"]
+    parsed = extract_json(response)
+    action_hypotheses = parsed["action_hypotheses"]
+    scene_check_hypotheses = parsed["scene_check_hypotheses"]
 
     return action_hypotheses, scene_check_hypotheses
 
@@ -438,7 +425,8 @@ Return exactly 8 pairs:
   """
 
         response = generate(boost_prompt)
-        paired_hypotheses = json.loads(re.findall("```json(.*?)```", response, re.DOTALL)[0].strip())["top8_pairs"]
+        parsed = extract_json(response)
+        paired_hypotheses = parsed["top8_pairs"]
 
     gates = [pair["scene_check_hypothesis"] for pair in paired_hypotheses]
     statement_candidates = [pair["action_hypothesis"] for pair in paired_hypotheses]
@@ -446,11 +434,13 @@ Return exactly 8 pairs:
     return gates, statement_candidates
 
 class CDT_Node:
-    def __init__(self, character, goal_topic, pairs, built_statements=None, depth=1, established_statements=[], gate_path=[], max_depth=3, threshold_accept=0.8, threshold_reject=0.5, threshold_filter=0.8):
+    def __init__(self, character, goal_topic, pairs, built_statements=None, depth=1, established_statements=None, gate_path=None, max_depth=3, threshold_accept=0.8, threshold_reject=0.5, threshold_filter=0.8):
         self.statements = []
         self.gates = [] # 1 gate -> 1 child
         self.children = []
         self.depth = depth
+        established_statements = established_statements or []
+        gate_path = gate_path or []
 
         if built_statements is not None:
             assert(pairs is None)
@@ -503,7 +493,8 @@ class CDT_Node:
     def traverse(self, scene):
         statements = deepcopy(self.statements)
         for gate, child in zip(self.gates, self.children):
-            if check_scene(scene, gate):
+            results = check_scene([scene], [gate])
+            if results[0]:
                 statements.extend(child.traverse(scene))
         return statements
 
