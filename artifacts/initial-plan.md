@@ -120,14 +120,14 @@ Extend Codified Decision Trees (CDT) into a general-purpose, evolving behavioral
 - [ ] Incremental update works without full reconstruction
 - [ ] Superseded patterns preserved with timestamps and reasons
 
-## Phase 4: Structured Gates + Domain-Agnostic
+## Phase 4: Semantic Gates + Domain-Agnostic
 
-**Goal:** Replace free-text gate conditions with structured JSON predicates. Make CDT work for any domain.
+**Goal:** Replace exec()-based gate conditions with semantic embedding gates. Make CDT work for any domain.
 
 ### Tasks
 
-1. **Structured gate format** — `{"field": "...", "op": "...", "value": "..."}`
-2. **Deterministic traversal** — No LLM calls at inference time
+1. **Semantic gate format** — Natural language gates with pre-computed embeddings, evaluated via cosine similarity (see canopy-design.md Section 3)
+2. **Deterministic traversal** — No LLM calls at inference time (embedding + cosine only)
 3. **Domain adapters** — Plugin system for different data sources (AI sessions, social media, etc.)
 4. **Delulu integration** — Use canopy as a library in the delulu project
 
@@ -173,7 +173,7 @@ canopy-ai/
 │   ├── traverse.py         # Deterministic CDT traversal
 │   ├── wikify.py           # CDT → human-readable profile
 │   ├── temporal.py         # T-CDT: time weighting, supersession
-│   ├── gates.py            # Structured gate predicates + matching engine
+│   ├── gates.py            # Semantic gate conditions + embedding-based matching
 │   └── adapters/           # Domain adapters
 │       ├── __init__.py
 │       ├── character.py    # Original CDT: character RP from storylines

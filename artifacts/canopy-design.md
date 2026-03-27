@@ -16,7 +16,7 @@ Canopy is a **domain-agnostic Codified Decision Tree (CDT) library** with tempor
 - **Semantic gate conditions:** Natural language gates with pre-computed embeddings. Traversal uses cosine similarity -- no LLM calls at inference time.
 - **Computed confidence:** Programmatic `confidence = supporting / (supporting + contradicting)` from binary LLM verdicts. No LLM-generated confidence floats.
 - **Two-layer data approach:** Pre-extracted summaries serve as hypotheses; raw data serves as validation evidence.
-- **Domain-agnostic adapters:** Any domain that produces (scene, action) pairs can use the CDT pipeline.
+- **Domain-agnostic adapters:** Any domain that produces behavioral observations can use the CDT pipeline. A `SceneActionPair` adapter convenience converts (scene, action) pairs to `BehavioralObservation`.
 
 ### Research Foundations
 
@@ -32,20 +32,39 @@ Canopy is a **domain-agnostic Codified Decision Tree (CDT) library** with tempor
 
 ## 2. Core Algorithm: CDT Construction
 
-The CDT construction pipeline transforms a flat list of (scene, action) pairs from any domain into a validated, hierarchical decision tree.
+The CDT construction pipeline transforms a flat list of behavioral observations from any domain into a validated, hierarchical decision tree.
 
 ### Input
 
-A flat list of `SceneActionPair` items. Canopy does not prescribe what "scene" and "action" mean -- domain adapters define the mapping.
+A flat list of `BehavioralObservation` items -- single text strings describing observed behavior in context. Canopy does not prescribe what the observation text contains -- domain adapters define the mapping.
+
+```python
+@dataclass(frozen=True)
+class BehavioralObservation:
+    text: str           # Combined scene+action behavioral description
+    timestamp: datetime | None = None  # For T-CDT temporal weighting
+    source_id: str | None = None       # Provenance reference
+    metadata: dict[str, str] = field(default_factory=dict)  # Domain-specific metadata
+```
+
+`SceneActionPair` is available as an adapter convenience that converts to `BehavioralObservation`:
 
 ```python
 @dataclass(frozen=True)
 class SceneActionPair:
     scene: str          # Context / situation description
     action: str         # Observed behavior / decision in that context
-    timestamp: datetime | None = None  # For T-CDT temporal weighting
-    source_id: str | None = None       # Provenance reference
-    metadata: dict[str, str] = field(default_factory=dict)  # Domain-specific metadata
+    timestamp: datetime | None = None
+    source_id: str | None = None
+    metadata: dict[str, str] = field(default_factory=dict)
+
+    def to_observation(self) -> BehavioralObservation:
+        return BehavioralObservation(
+            text=f"{self.scene} | {self.action}",
+            timestamp=self.timestamp,
+            source_id=self.source_id,
+            metadata=self.metadata,
+        )
 ```
 
 ### Step 1: Embedding-Based Clustering
@@ -53,16 +72,16 @@ class SceneActionPair:
 Discover natural domains from the data. **No predefined tags. No predefined vocabulary.** The clustering finds structure organically.
 
 ```
-Input:  N (scene, action) pairs
+Input:  N BehavioralObservation items
 Process:
-  1. Embed each pair: embed(scene + " | " + action)
+  1. Embed each observation: embed(observation.text)
   2. HDBSCAN clustering on embeddings (min_cluster_size, default 16)
      - HDBSCAN auto-discovers the number of clusters from data density — no k required
      - max_clusters serves as a safety cap: if HDBSCAN produces more, merge smallest clusters
      - Noise points (HDBSCAN label -1) are discarded
   3. Filter: discard clusters with fewer than min_cluster_size items
   4. Label each cluster via LLM: "Given these examples, what domain/theme do they represent?"
-Output: K clusters, each with a label and list of member pairs
+Output: K clusters, each with a label and list of member observations
 ```
 
 The embedding model is configurable (see Section 10). HDBSCAN is the primary clustering algorithm, auto-discovering cluster count from data density. KMeans is available as a fallback for datasets where HDBSCAN produces too many or too few clusters (e.g., uniformly distributed embeddings). The clustering interface allows substitution of any algorithm.
@@ -72,9 +91,9 @@ The embedding model is configurable (see Section 10). HDBSCAN is the primary clu
 For each cluster, the LLM generates candidate behavioral hypotheses -- testable statements about patterns in the data.
 
 ```
-Input:  Cluster label + member (scene, action) pairs
+Input:  Cluster label + member BehavioralObservation items
 Process:
-  LLM prompt: "Given these (scene, action) pairs from the domain '{label}',
+  LLM prompt: "Given these behavioral observations from the domain '{label}',
   extract testable behavioral hypotheses. Each hypothesis should be specific
   enough to validate against new evidence."
 Output: List of hypotheses per cluster
@@ -88,7 +107,7 @@ Each hypothesis includes:
 
 ### Step 3: Evidence-Based Validation
 
-Each hypothesis is validated against evidence items (the original pairs from that cluster, or a sampled subset for large clusters).
+Each hypothesis is validated against evidence items (the original observations from that cluster, or a sampled subset for large clusters).
 
 The LLM classifies each evidence item as one of three binary verdicts:
 - **supports** -- evidence FOR the hypothesis
@@ -364,11 +383,11 @@ class SupersessionRecord:
 
 New data does not require rebuilding the entire CDT. The incremental algorithm:
 
-1. New (scene, action) pairs are embedded
-2. Compute cluster centroids as the mean of member embeddings (an approximation for HDBSCAN, which does not produce centroids natively). Assign each pair to the cluster with highest cosine similarity to its centroid.
+1. New observations are embedded
+2. Compute cluster centroids as the mean of member embeddings (an approximation for HDBSCAN, which does not produce centroids natively). Assign each observation to the cluster with highest cosine similarity to its centroid.
 3. If distance > `new_cluster_threshold` (default: 2x the average intra-cluster distance), flag as a potential new cluster candidate
-4. If 5+ flagged pairs form a dense group (HDBSCAN on flagged pairs with `min_cluster_size`), create a new cluster
-5. Re-validate ALL hypotheses in affected clusters using the updated evidence set (including new pairs)
+4. If 5+ flagged observations form a dense group (HDBSCAN on flagged observations with `min_cluster_size`), create a new cluster
+5. Re-validate ALL hypotheses in affected clusters using the updated evidence set (including new observations)
 6. If `temporal_confidence` of any hypothesis drops below `cdt_reject_threshold` --> supersede (see Supersession Tracking above)
 7. If new clusters were formed --> run hypothesis generation + validation on them
 8. **Full rebuild trigger:** when > 30% of clusters are new, or > 50% of hypotheses have changed status, trigger a full CDT rebuild instead of incremental update
@@ -385,7 +404,7 @@ An optimization over standard CDT that separates hypothesis generation from vali
 Raw data --> Extract hypotheses --> Validate hypotheses (against same raw data)
 ```
 
-Standard CDT does both extraction and validation from the same raw data. This is expensive: the LLM must process all raw data twice.
+Standard CDT does both extraction and validation from the same raw data. This is expensive: the LLM must process all raw observations twice.
 
 ### Two-Layer Flow
 
@@ -413,7 +432,7 @@ Any system that produces both summaries and raw data can use this approach:
 - **Code review:** PR summaries (hypotheses) + individual file diffs (validation)
 - **Customer support:** Ticket summaries (hypotheses) + chat transcripts (validation)
 
-When no summaries exist, Canopy falls back to standard single-layer CDT: hypotheses and validation both come from the raw (scene, action) pairs.
+When no summaries exist, Canopy falls back to standard single-layer CDT: hypotheses and validation both come from the raw observations.
 
 ---
 
@@ -535,7 +554,7 @@ Reason: [Why the pattern changed]
 
 ## 9. Domain Adapters
 
-Domain adapters translate domain-specific data into the universal `SceneActionPair` format that the CDT pipeline consumes.
+Domain adapters translate domain-specific data into the universal `BehavioralObservation` format that the CDT pipeline consumes.
 
 ### Adapter Interface
 
@@ -544,8 +563,8 @@ from abc import ABC, abstractmethod
 
 class DomainAdapter(ABC):
     @abstractmethod
-    def extract_pairs(self, data: Any) -> list[SceneActionPair]:
-        """Extract (scene, action) pairs from domain-specific data."""
+    def extract_observations(self, data: Any) -> list[BehavioralObservation]:
+        """Extract behavioral observations from domain-specific data."""
         ...
 
     def extract_hypotheses(self, summaries: Any) -> list[str] | None:
@@ -559,30 +578,32 @@ class DomainAdapter(ABC):
 
 ### Character RP Adapter (Original CDT Use Case)
 
-The original CDT paper's use case: deriving character logic from storyline text.
+The original CDT paper's use case: deriving character logic from storyline text. Uses `SceneActionPair` as a convenience that converts to `BehavioralObservation`.
 
 ```python
 class CharacterAdapter(DomainAdapter):
-    def extract_pairs(self, data: list[str]) -> list[SceneActionPair]:
-        """Extract (scene, action) pairs from storyline text.
+    def extract_observations(self, data: list[str]) -> list[BehavioralObservation]:
+        """Extract observations from storyline text via SceneActionPair.
 
         Scene = narrative context / situation description
         Action = character's response / behavior in that scene
+        Converted to BehavioralObservation: "scene | action"
         """
-        ...
+        pairs = self._parse_scene_action_pairs(data)
+        return [p.to_observation() for p in pairs]
 ```
 
 ### User Profiling Adapter (delulu Use Case)
 
-Profiling a user's coding behavior from AI session data.
+Profiling a user's coding behavior from AI session data. Input is already combined scene+action in prose (classified interaction summaries), so maps directly to `BehavioralObservation`.
 
 ```python
 class UserProfileAdapter(DomainAdapter):
-    def extract_pairs(self, data: SessionData) -> list[SceneActionPair]:
-        """Extract (scene, action) pairs from classified interactions.
+    def extract_observations(self, data: SessionData) -> list[BehavioralObservation]:
+        """Extract observations from classified interaction summaries.
 
-        Scene = interaction context (task type, project, complexity)
-        Action = user's steering, correction, or decision
+        Summaries capture behavioral insight -- combined scene+action in prose.
+        Raw fields (output_text, reaction_text) are too verbose/terse.
         """
         ...
 
@@ -590,7 +611,7 @@ class UserProfileAdapter(DomainAdapter):
         """Extract hypotheses from session card fields.
 
         user_preferences -> behavioral statements
-        correction_patterns, steering_patterns -> (scene, action) pairs
+        correction_patterns, steering_patterns -> behavioral observations
         key_decisions -> conditional rules with evidence
         """
         ...
@@ -600,11 +621,11 @@ class UserProfileAdapter(DomainAdapter):
 
 To add a new domain adapter:
 
-1. Implement `DomainAdapter.extract_pairs()` to map your data to `SceneActionPair`
+1. Implement `DomainAdapter.extract_observations()` to map your data to `BehavioralObservation`
 2. Optionally implement `extract_hypotheses()` if you have pre-extracted summaries
 3. Register the adapter with the CDT builder
 
-The CDT pipeline is completely agnostic to the adapter's domain. Clustering, validation, tree building, and traversal all operate on the universal (scene, action) representation.
+The CDT pipeline is completely agnostic to the adapter's domain. Clustering, validation, tree building, and traversal all operate on the universal `BehavioralObservation` representation.
 
 ---
 
@@ -636,13 +657,14 @@ All CDT-specific configuration values with defaults and valid ranges.
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
+| `time_decay_enabled` | true | -- | Enable T-CDT temporal weighting. When false, standard CDT (equal weight). |
 | `time_decay_half_life_days` | 90 | 7-365 | Half-life for temporal weight decay |
 
 ### Embedding Parameters
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
-| `embedding_model` | (configurable) | -- | Model used for embedding scenes, actions, and gate conditions |
+| `embedding_model` | (configurable) | -- | Model used for embedding observations and gate conditions |
 | `gate_similarity_threshold` | 0.75 | 0.5-1.0 | Default cosine similarity threshold for gate activation |
 | `gate_llm_verification` | false | -- | Use LLM to verify borderline gate decisions (score 0.6-0.85) |
 
@@ -662,6 +684,7 @@ class CDTConfig:
     new_cluster_threshold: float = 2.0  # Multiplier on avg intra-cluster distance for new cluster detection
 
     # Temporal
+    time_decay_enabled: bool = True
     time_decay_half_life_days: int = 90
 
     # Embeddings
@@ -690,7 +713,7 @@ class CDTConfig:
 ```
 src/canopy/
 ├── __init__.py          # Public API exports
-├── core.py              # CDTNode, CDTTree, SceneActionPair, GateCondition dataclasses
+├── core.py              # CDTNode, CDTTree, BehavioralObservation, SceneActionPair, GateCondition dataclasses
 ├── builder.py           # CDT construction algorithm (Steps 1-5)
 ├── embeddings.py        # Embedding model management, cosine similarity
 ├── clustering.py        # HDBSCAN clustering (KMeans fallback), cluster labeling
@@ -745,7 +768,61 @@ traverse.py
 
 ---
 
-## 12. Research References
+## 12. Design Decisions Log
+
+Decisions made during design discussions, with rationale.
+
+### D1: BehavioralObservation replaces SceneActionPair as primary input
+
+**Decision:** The primary CDT input is `BehavioralObservation` (single text string), not `(scene, action)` pairs. `SceneActionPair` remains as an adapter convenience that converts to `BehavioralObservation` via `to_observation()`.
+
+**Rationale:** Our data (classified interaction summaries from delulu) are combined scene+action in prose. Raw fields (`output_text`, `reaction_text`) are too verbose/terse. Summaries capture behavioral insight. CDT's clustering, hypothesis generation, and validation all work with single text embeddings -- the scene/action split adds no value to the algorithm. The original CDT paper's (scene, action) format is a domain-specific input structure, not a requirement of the CDT algorithm itself.
+
+### D2: Three verdict classification (not four)
+
+**Decision:** Validation uses three verdicts: `supports`, `contradicts`, `irrelevant`. No `unknown` option.
+
+**Rationale:** "Unknown" and "irrelevant" serve the same purpose -- both are excluded from the confidence calculation `supporting / (supporting + contradicting)`. Adding "unknown" gives the LLM an escape hatch that reduces signal. When the LLM cannot determine relevance, `irrelevant` is the correct classification.
+
+### D3: Traversal modes configurable
+
+**Decision:** Three traversal modes: `SEMANTIC` (default, embedding cosine similarity), `LLM` (accurate but slow, LLM evaluates each gate), `HYBRID` (semantic pre-filter + LLM for borderline cases). Not locked to one approach.
+
+**Rationale:** Different use cases have different latency/accuracy tradeoffs. Default semantic mode is fast (no LLM calls at inference). LLM mode is available for high-stakes decisions. Hybrid balances both. The `gate_llm_verification` config option in Section 3 implements the hybrid approach for borderline gate scores.
+
+### D4: T-CDT configurable with equal-weight fallback
+
+**Decision:** `time_decay_enabled: bool = True`. When `False`, standard CDT behavior (all evidence weighted equally). Easy A/B comparison.
+
+**Rationale:** Allows benchmarking T-CDT against standard CDT on the same data. Essential for the research paper (Phase 5) and for domains where temporal dynamics are not relevant.
+
+### D5: Validation batching configurable
+
+**Decision:** `max_validation_items: int = 500` (mapped to `cdt_max_validation_items` in config). Set to 0 for unlimited (validate all evidence). Default 500 for cost control.
+
+**Rationale:** Large clusters can have thousands of evidence items. Validating all of them is expensive and hits context window limits. Sampling the top N by quality/recency is semantically sound. The 0 option exists for small datasets or when accuracy is paramount.
+
+### D6: No exec() -- JSON only
+
+**Decision:** No support for `exec()` on LLM output, ever. Not even as an option or comparison mode. All LLM output is parsed as JSON.
+
+**Rationale:** The original CDT paper uses `exec()` on LLM-generated Python predicates for gate evaluation. This is a security risk with zero benefit over JSON parsing + semantic embedding gates. Canopy uses natural language gates with pre-computed embeddings (Section 3) instead of executable code.
+
+### D7: Rules augmentation is a later phase
+
+**Decision:** Rules augmentation (Section 2, Step 6) is not in canopy Phase 0-1. It is a delulu-specific enrichment feature, not core CDT.
+
+**Rationale:** Rules augmentation attaches external rule files to CDT nodes. This is domain-specific (delulu reads `~/.claude/rules/`). The core CDT algorithm does not depend on it. Canopy Phase 0-1 focuses on the algorithm; rules augmentation is deferred.
+
+### D8: LLM confidence scores removed from delulu Phase 2
+
+**Decision:** Both `confidence` and `source_confidence` fields removed from delulu Phase 2 classification output. Origin (human vs machine) is determined by tags, not LLM estimation.
+
+**Rationale:** LLM-generated confidence floats are unreliable (PERSONAMEM finding). Computed evidence (`supporting / (supporting + contradicting)`) from binary verdicts is strictly more trustworthy. This reinforces the principle throughout the system: computed evidence > LLM self-assessment. Phase 3's quality filtering should use tag-based origin detection rather than `source_confidence`.
+
+---
+
+## 13. Research References
 
 | Paper | ArXiv ID | Key Contribution to Canopy |
 |-------|----------|---------------------------|
@@ -764,6 +841,7 @@ traverse.py
 | Validation | NLI model (DeBERTa) | LLM-based (primary) + NLI (alternative) |
 | Confidence | NLI entailment scores | Programmatic: supporting/(supporting+contradicting) |
 | Temporal awareness | None | T-CDT: time decay, supersession tracking |
+| Input format | (scene, action) pairs | BehavioralObservation (single text); SceneActionPair as adapter convenience |
 | Hypothesis source | Extracted from raw data | Two-layer: summaries (hypotheses) + raw (validation) |
 | Clustering | Predefined character traits | Embedding-based HDBSCAN (auto-discovers structure and cluster count) |
 | Traversal | `exec()` gate evaluation | Cosine similarity (no code execution) |
