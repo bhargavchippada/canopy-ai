@@ -9,7 +9,21 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 ## Current Phase
 
 **Phase 0: Baseline Reproduction** — Reproducing original CDT benchmarks with Claude (not GPT).
+- Phase 0A COMPLETE: Kasumi CDT smoke test passed (26 nodes, 72 statements, quality PASS)
+- Phase 0B: Running additional characters (Arisa with depth=3)
 **Next:** Phase 1 (full migration) — only after Phase 0 passes all success criteria.
+
+## Design Reference
+
+**Authoritative CDT design:** `artifacts/canopy-design.md` (25 design decisions D1-D25)
+- BehavioralObservation as primary input (not SceneActionPair)
+- HDBSCAN clustering (discovers domains from data)
+- Semantic gate conditions (embedding cosine similarity)
+- Two-pass cross-cluster validation (follows CDT paper)
+- T-CDT temporal weighting (configurable, fallback to equal weight)
+- Unified hypothesis pipeline (any source: clusters, session cards, rules, docs, manual)
+- Bootstrap mode (CDT from rules/docs with zero sessions)
+- Computed confidence from evidence counts (not LLM self-assessed)
 
 ## Principles
 
@@ -91,8 +105,10 @@ canopy-ai/
 ├── cdt_profiling.py           # Profiling/wikification (NOT YET MIGRATED — Phase 1)
 ├── build_cdt.sh               # Shell wrapper for CDT construction
 ├── artifacts/                 # Design docs, results
+│   ├── canopy-design.md       # Authoritative CDT design (25 decisions)
 │   ├── initial-plan.md
 │   ├── phase0-phase1-prd.md
+│   ├── phase0-results.md      # Smoke test results
 │   └── llm-adapters.md
 ├── data/                      # Cached HF datasets (gitignored)
 ├── packages/                  # Output CDT packages (gitignored)
