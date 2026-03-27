@@ -118,11 +118,40 @@ canopy-ai/
 └── pyproject.toml
 ```
 
+## Phase 0 Results
+
+Baseline reproduction PASSED for 2 characters:
+
+| Character | Nodes | Statements | Max Depth | Runtime |
+|-----------|-------|------------|-----------|---------|
+| Kasumi | 26 | 72 | 3 | ~1.5 hr |
+| Arisa | 30 | 79 | 4 | ~3 hr |
+
+Paper PoPiPa avg: 10.4 nodes, 61 statements (comparable given config differences).
+See `artifacts/phase0-results.md` for full analysis.
+
+## Performance Bottleneck
+
+LLM calls via claude-code-sdk subprocess: **30-60s per call**.
+CDT construction makes ~50-100+ calls per character.
+
+**Planned optimizations:**
+- Switch hypothesis gen to Haiku (faster, cheaper — Sonnet overkill)
+- Add `extra_args` to skip settings/tools loading (~4.5s savings per call)
+- Parallelize independent LLM calls with `asyncio.gather`
+- Use `claude-code-sdk` (not `claude-agent-sdk`) matching delulu patterns
+
+**Model allocation:**
+- **DeBERTa NLI** — validation (GPU, 6 seconds for full dataset, keep as-is)
+- **Haiku** — hypothesis generation (LLM, currently the bottleneck)
+- **Sonnet** — reserve for evaluation/benchmarking where quality matters
+
 ## Known Issues
 
 - `run_benchmark.py` and `cdt_profiling.py` still import from OpenAI — will crash until Phase 1 migration
 - `cdt_profiling.py` still has `exec()` on LLM output — Phase 1 will fix
 - Llama-3.1-8B-Instruct requires HF login for download (gated model)
+- LLM call overhead: ~30-60s per call (subprocess + settings loading)
 
 ## Conventions
 
