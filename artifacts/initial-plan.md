@@ -65,12 +65,12 @@ Extend Codified Decision Trees (CDT) into a general-purpose, evolving behavioral
 1. **Package restructure** — Move core logic into `src/canopy/`
 2. **Remove exec()** — Replace `exec()` on LLM output with structured JSON parsing
 3. **LLM adapter pattern** — Abstract LLM calls behind adapter interface (already started)
-4. **Proper installable package** — `pip install canopy-ai` from local path works, Python >=3.13
+4. **Proper installable package** — `uv add canopy-ai` from local path works, Python >=3.13
 5. **Migrate run_benchmark.py and cdt_profiling.py** — Into package CLI or modules
 6. **Tests** — Unit tests for core algorithm, traversal, validation
 
 ### Success Criteria
-- [ ] `pip install -e .` / `uv sync` works
+- [ ] `uv sync` / `uv add canopy-ai` works
 - [ ] `import canopy` imports cleanly
 - [ ] No exec() in codebase
 - [ ] LLM calls go through adapter pattern
@@ -131,7 +131,7 @@ Extend Codified Decision Trees (CDT) into a general-purpose, evolving behavioral
 4. **Baselines** — CDT, PURE, PERSONAMEM approaches
 5. **Target venue** — ACL/EMNLP/NeurIPS workshop on personalization or user modeling
 6. **Documentation** — Examples, tutorials, API reference
-7. **PyPI publish** — `pip install canopy-ai` from PyPI
+7. **PyPI publish** — `uv add canopy-ai` from PyPI
 
 ## Key Research Papers
 

@@ -36,11 +36,11 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 
 ## Tech Stack
 
-- **Language:** Python 3.11+
+- **Language:** Python 3.13+
 - **Package manager:** uv (NEVER pip)
 - **LLM:** Claude via claude-agent-sdk (Max subscription, no API key)
 - **LLM Model:** claude-sonnet-4-6 (default)
-- **Embeddings:** Qwen3-0.6B (smoke test) / Qwen3-8B (full run)
+- **Embeddings:** Qwen3-0.6B (Phase 0 smoke test) / all-MiniLM-L6-v2 (library default, see D24)
 - **NLI:** DeBERTa-v3-base-rp-nli
 - **Testing:** pytest
 - **Linting:** ruff

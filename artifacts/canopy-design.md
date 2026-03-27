@@ -1081,7 +1081,7 @@ Per-section failure can be retried without redoing the entire profile.
 - **Contradictions:** Adversarial detection — does the CDT contain self-contradicting rules?
 - **Review:** Human annotation document for manual assessment.
 
-Each mode can be run independently or in any combination. CLI: `delulu eval --mode scenarios|holdout|contradictions|review`.
+Each mode can be run independently or in any combination. Canopy provides the evaluation logic; the CLI is implemented by the consuming application (e.g., `delulu eval --mode scenarios|holdout|contradictions|review`).
 
 **Rationale:** Independent evaluation modes avoid coupling between assessment methods. A CDT that scores well on holdout prediction but poorly on contradiction detection reveals a different class of problem than one that fails both. Running modes independently also enables incremental evaluation during development.
 
