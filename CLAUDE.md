@@ -9,6 +9,16 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 ## Current Phase
 
 **Phase 0: Baseline Reproduction** — Reproducing original CDT benchmarks.
+**Next:** Phase 1 (Claude migration) — only after Phase 0 passes all success criteria.
+
+## Principles
+
+- **Step by step** — Nail Phase 0-1 before planning further. No scope creep.
+- **Branch per phase** — Each phase gets its own branch, merged only when complete.
+- **Simple and clean** — No over-engineering. Minimum complexity for current needs.
+- **Research first** — Always search online for tools, libraries, and patterns to reuse before building from scratch.
+- **Iterate** — Small commits, frequent validation against real data.
+- **Gate before proceeding** — Each phase has success criteria. Don't start next until current passes.
 
 ## Tech Stack
 
