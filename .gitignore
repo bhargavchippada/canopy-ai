@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+constant.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test/coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# uv
+.python-version
+
+# Claude
+.claude/
+
+# Model cache / large files
+packages/*.pkl
+packages/*.pickle
+*.pt
+*.bin
+*.safetensors
+
+# Data (downloaded at runtime)
+data/
+storylines/
+profiles/*.txt
