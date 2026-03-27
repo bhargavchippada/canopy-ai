@@ -1104,6 +1104,31 @@ Traversal context includes session phase, interaction count, and recent interact
 
 **Rationale:** Introducing a separate workflow sequence concept adds a parallel system alongside gates. Gates are already capable of encoding phase awareness through natural language conditions. The traversal context provides the structured metadata (interaction count, phase) that gates can reference via embedding similarity. Adding a dedicated workflow system is premature — gates should be proven insufficient first.
 
+### D26: Model allocation per pipeline step
+
+**Decision:** Different models for different steps based on cost, speed, and quality requirements:
+
+| Step | Model | Rationale |
+|------|-------|-----------|
+| Hypothesis generation | Haiku (or local model) | Creative but simple task — extract patterns from 8 observations. Haiku is fast and cheap. |
+| Cluster labeling | Haiku | Simple naming task. |
+| Validation | DeBERTa NLI (local GPU) | High-volume step (~1,200 inferences). DeBERTa is purpose-built for NLI, runs in ~6 seconds vs ~60 minutes with Sonnet. Free after model load. |
+| Wikification | Sonnet/Opus | Quality matters — this is the final profile document the Sidekick reads. |
+| Evaluation | Sonnet | Reasoning matters for accurate scoring. |
+
+**Validation is the most expensive step** — O(hypotheses × observations) inferences. Using LLM calls for validation is ~25x more expensive than DeBERTa:
+- DeBERTa: ~1,200 inferences × ~5ms = ~6 seconds (free, GPU)
+- Haiku: ~1,200 calls × ~2s = ~40 minutes (~$0.10)
+- Sonnet: ~1,200 calls × ~30s = ~10 hours (~$1.50)
+
+**Alternatives for validation (configurable):**
+- `DeBERTa NLI` (default) — `KomeijiForce/deberta-v3-base-rp-nli`, 715MB, fine-tuned for CDT
+- `Haiku` — fallback when no GPU available, slower but works
+- `Local Qwen NLI` — larger local model if DeBERTa quality is insufficient, explore Qwen3-based NLI
+- `Sonnet` — highest quality, use only for debugging/evaluation, not production runs
+
+**Rationale:** The CDT paper uses DeBERTa for validation precisely because of the volume. Replacing it with LLM calls would be 25x slower and add cost for marginal quality improvement on a binary classification task (support/contradict/irrelevant). Reserve expensive models for creative tasks (hypothesis gen, wikification) where quality variance matters.
+
 ---
 
 ## 14. Research References
