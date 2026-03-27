@@ -10,7 +10,7 @@ from copy import deepcopy
 from datasets import load_dataset
 from tqdm import tqdm
 from sklearn.cluster import KMeans
-from llm import generate as llm_generate, extract_json
+from llm import generate as llm_generate, generate_many as llm_generate_many, extract_json
 
 # character = "Kasumi"
 # engine = "gpt-4.1"
@@ -255,13 +255,14 @@ Directly answer only yes/no/unknown.''' for action, statement in zip(actions, st
 
     return probs
 
-def make_hypothesis(cluster, character, goal_topic, established_statements, gate_path, k=3):
+def make_hypothesis_prompt(cluster, character, goal_topic, established_statements, gate_path, k=3):
+    """Build the hypothesis prompt for a cluster. Does NOT call LLM."""
 
     action_scene_context = "\n\n".join(["# Scene:\n"+pair["scene"]+"\n# Action:\n"+pair["action"] for pair in cluster])
     established_statement_verbalized = "\n".join(established_statements) if len(established_statements) > 0 else "N/A"
     gate_path_verbalized = "\n".join(gate_path) if len(gate_path) > 0 else "N/A"
 
-    prompt = f'''# Scene-Action Pairs
+    return f'''# Scene-Action Pairs
 {action_scene_context}
 
 # Established Statements
@@ -299,13 +300,34 @@ Where action_hypotheses is a list of syntactically complete statements (always m
 and scene_check_hypotheses is a list of syntactically complete questions to check the given scene (always mentioning {character}).
 '''
 
-    response = generate(prompt)
 
+def parse_hypothesis_response(response):
+    """Parse a hypothesis LLM response into (action_hypotheses, scene_check_hypotheses)."""
     parsed = extract_json(response)
-    action_hypotheses = parsed["action_hypotheses"]
-    scene_check_hypotheses = parsed["scene_check_hypotheses"]
+    action_hyps = parsed.get("action_hypotheses", [])
+    scene_hyps = parsed.get("scene_check_hypotheses", [])
+    # Ensure paired lists — truncate to shorter length if mismatched
+    min_len = min(len(action_hyps), len(scene_hyps))
+    return action_hyps[:min_len], scene_hyps[:min_len]
 
-    return action_hypotheses, scene_check_hypotheses
+
+def make_hypotheses_batch(clusters, character, goal_topic, established_statements, gate_path, k=3):
+    """Generate hypotheses for ALL clusters in parallel."""
+    prompts = [
+        make_hypothesis_prompt(cluster, character, goal_topic, established_statements, gate_path, k)
+        for cluster in clusters
+    ]
+    responses = llm_generate_many(prompts, model=engine)
+    statement_candidates, gates = [], []
+    for i, response in enumerate(responses):
+        try:
+            action_hyps, scene_hyps = parse_hypothesis_response(response)
+            statement_candidates.extend(action_hyps)
+            gates.extend(scene_hyps)
+        except (ValueError, KeyError) as exc:
+            print(f"  Warning: cluster {i} hypothesis parsing failed: {exc}")
+            continue
+    return statement_candidates, gates
 
 def validate_hypothesis(character, pairs, hypothesized_question, hypothesized_action, bs=64):
     # When hypothesized_question is None, always check the statement
@@ -449,11 +471,8 @@ class CDT_Node:
             pass
         else:
             clusters = select_cluster_centers(character, pairs, n_in_cluster_case=16, n_in_cluster_sample=8, n_max_cluster=8, bs=8)
-            statement_candidates, gates = [], []
-            for cluster in tqdm(clusters, desc="Making Hypotheses...", leave=leave_bar):
-                statement_candidates_cluster, gates_cluster = make_hypothesis(cluster, character, goal_topic, established_statements+self.statements, gate_path)
-                statement_candidates.extend(statement_candidates_cluster)
-                gates.extend(gates_cluster)
+            print(f"  Making hypotheses for {len(clusters)} clusters in parallel...")
+            statement_candidates, gates = make_hypotheses_batch(clusters, character, goal_topic, established_statements+self.statements, gate_path)
 
             gates, statement_candidates = summarize_triggers(character, gates, statement_candidates)
             global_statements, gated_statements = [], []
