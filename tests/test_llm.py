@@ -501,6 +501,67 @@ class TestSessionGenerate:
         # Client constructor should only be called once
         assert mock_sdk.ClaudeSDKClient.call_count == 1
 
+    def test_session_generate_max_tokens_truncates(self) -> None:
+        """_session_generate applies max_tokens truncation."""
+        adapter = ClaudeCodeAdapter(default_model="m", timeout=5.0, max_retries=0, reuse_session=True)
+
+        mock_sdk = MagicMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock
+        mock_sdk.TextBlock = MockTextBlock
+
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+
+        long_text = "First sentence here. Second sentence here. Third is long."
+
+        async def mock_send(prompt):
+            yield MockAssistantMessage(content=[MockTextBlock(text=long_text)])
+
+        mock_client.send_message = mock_send
+        mock_sdk.ClaudeSDKClient = MagicMock(return_value=mock_client)
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            result = asyncio.run(adapter._session_generate("test", "m", max_tokens=10))
+        assert result == "First sentence here."
+
+
+class TestSystemPrompt:
+    """Test system_prompt configurability."""
+
+    def test_default_system_prompt(self) -> None:
+        adapter = ClaudeCodeAdapter(default_model="m")
+        assert "helpful" in adapter._system_prompt
+
+    def test_custom_system_prompt(self) -> None:
+        adapter = ClaudeCodeAdapter(default_model="m", system_prompt="Custom prompt.")
+        assert adapter._system_prompt == "Custom prompt."
+
+    def test_none_system_prompt(self) -> None:
+        adapter = ClaudeCodeAdapter(default_model="m", system_prompt=None)
+        assert adapter._system_prompt is None
+
+
+class TestApplyTokenBudget:
+    """Test _apply_token_budget helper directly."""
+
+    def test_short_text_unchanged(self) -> None:
+        from canopy.llm import _apply_token_budget
+
+        assert _apply_token_budget("Short.", 100) == "Short."
+
+    def test_truncates_at_period(self) -> None:
+        from canopy.llm import _apply_token_budget
+
+        text = "First sentence. Second sentence. Third sentence is very long here."
+        result = _apply_token_budget(text, 10)  # 40 chars
+        assert result == "First sentence. Second sentence."
+
+    def test_no_period_keeps_raw(self) -> None:
+        from canopy.llm import _apply_token_budget
+
+        result = _apply_token_budget("No periods in this text at all forever", 5)  # 20 chars
+        assert result == "No periods in this t"
+
 
 class TestModuleFunctions:
     def test_set_adapter_and_generate(self) -> None:
