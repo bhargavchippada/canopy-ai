@@ -233,3 +233,65 @@ class TestFullPipeline:
         md = wikify_tree(tree, title="Alice's identity")
         assert "Alice is kind" in md
         assert "## Alice's identity" in md
+
+
+# ---------------------------------------------------------------------------
+# Pre-computed embedding cache tests
+# ---------------------------------------------------------------------------
+
+
+class TestPrecomputeEmbeddings:
+    def test_precompute_subprocess(self) -> None:
+        """Pre-compute embeddings via subprocess with 0.6B models."""
+        from canopy.embeddings import precompute_embeddings
+
+        pairs = [
+            {"scene": f"Scene {i}: something happens", "action": f"Character does thing {i}"}
+            for i in range(5)
+        ]
+        cache = precompute_embeddings(
+            character="Alice",
+            pairs=pairs,
+            surface_embedder_path=SURFACE_EMBEDDER,
+            generator_embedder_path=GENERATOR_EMBEDDER,
+            device=f"cuda:{DEVICE.index or 0}" if DEVICE.type == "cuda" else "cpu",
+        )
+        assert cache.surface.shape[0] == 5
+        assert cache.generator.shape[0] == 5
+        assert cache.surface.shape[1] > 0
+        assert cache.generator.shape[1] > 0
+        # Verify L2-normalized
+        norms = np.linalg.norm(cache.surface, axis=1)
+        np.testing.assert_allclose(norms, 1.0, atol=1e-5)
+
+    def test_cache_clustering_matches_direct(self, embedding_models: None) -> None:
+        """Cache-based clustering produces same structure as direct encoding."""
+        from canopy.embeddings import precompute_embeddings, select_cluster_centers
+
+        pairs = [
+            {"scene": f"Scene {i}: things happen", "action": f"Character acts {i}"}
+            for i in range(20)
+        ]
+        # Direct path (legacy — uses init_models)
+        direct_clusters = select_cluster_centers(
+            "Alice", pairs, n_in_cluster_case=10, n_max_cluster=4, bs=4,
+        )
+
+        # Cache path
+        cache = precompute_embeddings(
+            character="Alice", pairs=pairs,
+            surface_embedder_path=SURFACE_EMBEDDER,
+            generator_embedder_path=GENERATOR_EMBEDDER,
+            device=f"cuda:{DEVICE.index or 0}" if DEVICE.type == "cuda" else "cpu",
+        )
+        indexed_pairs = [{**p, "_embed_idx": i} for i, p in enumerate(pairs)]
+        cache_clusters = select_cluster_centers(
+            "Alice", indexed_pairs, n_in_cluster_case=10, n_max_cluster=4, bs=4,
+            embedding_cache=cache,
+        )
+
+        # Same number of clusters
+        assert len(cache_clusters) == len(direct_clusters)
+        # Same number of samples per cluster
+        for cc, dc in zip(cache_clusters, direct_clusters):
+            assert len(cc) == len(dc)

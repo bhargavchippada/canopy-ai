@@ -13,11 +13,13 @@ __version__ = "0.1.0"
 
 from canopy.builder import BehavioralObservation, build_cdt, build_character_profile
 from canopy.core import CDTConfig, CDTNode, build_character_cdts
+from canopy.embeddings import EmbeddingCache
 
 __all__ = [
     "BehavioralObservation",
     "CDTConfig",
     "CDTNode",
+    "EmbeddingCache",
     "build_character_cdts",
     "build_character_profile",
     "build_cdt",

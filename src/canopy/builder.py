@@ -78,6 +78,7 @@ def build_cdt(
     character: str,
     topic: str,
     config: CDTConfig | None = None,
+    embedding_cache: Any | None = None,
 ) -> CDTNode:
     """Build a single CDT for a character on a specific topic.
 
@@ -88,6 +89,7 @@ def build_cdt(
         character: The character/subject to profile.
         topic: The behavioral aspect to focus on (e.g. "identity", "personality").
         config: CDT construction parameters. Uses defaults if None.
+        embedding_cache: Pre-computed embeddings from ``precompute_embeddings()``.
 
     Returns:
         A CDTNode tree rooted at the given topic.
@@ -95,7 +97,7 @@ def build_cdt(
     pairs = _observations_to_pairs(observations)
     cfg = config or CDTConfig()
     log.info("Building CDT for %s / %s (%d observations)", character, topic, len(pairs))
-    return CDTNode(character, topic, pairs, config=cfg)
+    return CDTNode(character, topic, pairs, config=cfg, _embedding_cache=embedding_cache)
 
 
 def build_character_profile(
@@ -104,6 +106,7 @@ def build_character_profile(
     character: str,
     other_characters: list[str] | None = None,
     config: CDTConfig | None = None,
+    embedding_cache: Any | None = None,
 ) -> tuple[dict[str, CDTNode], dict[str, CDTNode]]:
     """Build a full character profile — all attribute and relationship CDTs.
 
@@ -114,6 +117,7 @@ def build_character_profile(
         character: The character/subject to profile.
         other_characters: Other characters for relationship CDTs. If None, extracted from observations.
         config: CDT construction parameters.
+        embedding_cache: Pre-computed embeddings from ``precompute_embeddings()``.
 
     Returns:
         (topic2cdt, rel_topic2cdt) — attribute and relationship CDT dicts.
@@ -130,4 +134,5 @@ def build_character_profile(
 
     log.info("Building profile for %s (%d observations, %d relationships)",
              character, len(pairs), len(other_characters))
-    return build_character_cdts(character, pairs, other_characters, config)
+    return build_character_cdts(character, pairs, other_characters, config,
+                                embedding_cache=embedding_cache)

@@ -16,7 +16,7 @@ import torch
 
 from canopy.core import CDTConfig, build_character_cdts
 from canopy.data import load_ar_pairs, load_character_metadata
-from canopy.embeddings import init_models as init_embedding_models
+from canopy.embeddings import precompute_embeddings
 from canopy.llm import ClaudeCodeAdapter, set_adapter
 from canopy.validation import init_models as init_validation_models
 
@@ -82,9 +82,7 @@ def main() -> None:
     # Configure LLM adapter
     set_adapter(ClaudeCodeAdapter(default_model=args.engine))
 
-    # Load models
-    log.info("Loading embedding models...")
-    init_embedding_models(args.surface_embedder_path, args.generator_embedder_path, device)
+    # Load validation model (DeBERTa ~715MB — stays in main process)
     log.info("Loading validation model...")
     init_validation_models(args.discriminator_path, device)
 
@@ -94,6 +92,29 @@ def main() -> None:
     other_characters = [c for c in all_characters[artifact]["major"] if c != args.character]
     pairs = load_ar_pairs(args.character, character2artifact, band2members)["train"]
 
+    if args.cluster_method != "kmeans":
+        log.warning(
+            "--cluster_method=%s specified but only kmeans is implemented. "
+            "Clustering will use kmeans. Filename will reflect '%s'.",
+            args.cluster_method, args.cluster_method,
+        )
+
+    # Phase A: Pre-compute embeddings (subprocess isolation for VRAM safety)
+    # Each model loads once in a subprocess, encodes ALL pairs, exits.
+    # OS reclaims VRAM on subprocess exit — no PyTorch leak issues.
+    log.info("Phase A: Pre-computing embeddings via subprocess isolation...")
+    cache = precompute_embeddings(
+        character=args.character,
+        pairs=pairs,
+        surface_embedder_path=args.surface_embedder_path,
+        generator_embedder_path=args.generator_embedder_path,
+        device=f"cuda:{args.device_id}",
+    )
+    log.info("Phase A complete: surface=%s, generator=%s", cache.surface.shape, cache.generator.shape)
+
+    # Stamp _embed_idx on copies (never mutate caller's dicts)
+    indexed_pairs = [{**pair, "_embed_idx": idx} for idx, pair in enumerate(pairs)]
+
     config = CDTConfig(
         max_depth=args.max_depth,
         threshold_accept=args.threshold_accept,
@@ -101,9 +122,12 @@ def main() -> None:
         threshold_filter=args.threshold_filter,
     )
 
-    # Build CDTs
+    # Phase B: Build CDTs (no GPU model loading, max_parallel=4)
+    # Uses pre-computed embeddings for clustering. Only LLM API + DeBERTa.
+    log.info("Phase B: Building CDTs with pre-computed embeddings...")
     topic2cdt, rel_topic2cdt = build_character_cdts(
-        args.character, pairs, other_characters, config, max_parallel=4,
+        args.character, indexed_pairs, other_characters, config,
+        max_parallel=4, embedding_cache=cache,
     )
 
     # Compute stats
@@ -131,7 +155,8 @@ def main() -> None:
     metadata = {
         "character": args.character,
         "gen_model": args.engine,
-        "embed_model": args.surface_embedder_path,
+        "surface_embed_model": args.surface_embedder_path,
+        "generator_embed_model": args.generator_embedder_path,
         "nli_model": args.discriminator_path,
         "cluster_method": args.cluster_method,
         "max_depth": args.max_depth,

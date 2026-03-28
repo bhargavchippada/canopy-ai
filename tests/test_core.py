@@ -426,3 +426,85 @@ class TestBuildCharacterCdts:
         with patch("canopy.core.CDTNode", side_effect=_failing_cdtnode):
             with pytest.raises(RuntimeError, match="CDT build failed"):
                 build_character_cdts("Alice", [], [], config=CDTConfig())
+
+    def test_build_character_cdts_with_cache(self) -> None:
+        """embedding_cache is forwarded to CDTNode constructors."""
+        captured_kwargs: list[dict] = []
+        original_init = CDTNode.__init__
+
+        def tracking_init(self_node: Any, *args: Any, **kwargs: Any) -> None:
+            captured_kwargs.append(kwargs)
+            # Call original but skip _build by using max_depth=0
+            original_init(self_node, *args, **{**kwargs, "config": CDTConfig(max_depth=0)})
+
+        cache_sentinel = object()
+        with patch.object(CDTNode, "__init__", tracking_init):
+            build_character_cdts(
+                "Alice", [], [], config=CDTConfig(max_depth=0),
+                embedding_cache=cache_sentinel,
+            )
+
+        # All CDTNode calls should have received _embedding_cache
+        for kw in captured_kwargs:
+            assert kw.get("_embedding_cache") is cache_sentinel
+
+
+# ---------------------------------------------------------------------------
+# CDTNode — cache forwarding
+# ---------------------------------------------------------------------------
+
+
+class TestCDTNodeCacheForwarding:
+    def _pairs(self, n: int = 20) -> list[dict[str, Any]]:
+        return [{"action": f"action_{i}", "scene": f"scene_{i}", "_embed_idx": i} for i in range(n)]
+
+    def test_cache_forwarded_to_children(self) -> None:
+        """When _embedding_cache is set and child nodes are created, cache is forwarded."""
+        cache_sentinel = object()
+        child_caches: list[Any] = []
+
+        original_init = CDTNode.__init__
+
+        def tracking_init(self_node: Any, *args: Any, **kwargs: Any) -> None:
+            if kwargs.get("_embedding_cache") is not None:
+                child_caches.append(kwargs["_embedding_cache"])
+            original_init(self_node, *args, **kwargs)
+
+        with patch.object(CDTNode, "__init__", tracking_init):
+            CDTNode(
+                "Alice",
+                "identity",
+                self._pairs(),
+                config=CDTConfig(max_depth=2),
+                _embedder=_mock_cluster_fn,
+                _validator=_mock_validate_gated,
+                _hypothesis_fn=_mock_hypothesize,
+                _summarize_fn=_mock_summarize,
+                _embedding_cache=cache_sentinel,
+            )
+
+        # Root + children should all have the sentinel
+        assert all(c is cache_sentinel for c in child_caches)
+
+    def test_embedder_override_takes_priority(self) -> None:
+        """When _embedder is explicitly provided, it takes priority over cache path."""
+        calls: list[str] = []
+
+        def tracking_cluster(*a: Any, **kw: Any) -> list[list[dict]]:
+            calls.append("custom_embedder")
+            return _mock_cluster_fn(*a, **kw)
+
+        cache_sentinel = object()
+        CDTNode(
+            "Alice",
+            "identity",
+            self._pairs(),
+            config=CDTConfig(max_depth=1),
+            _embedder=tracking_cluster,
+            _validator=_mock_validate_accept,
+            _hypothesis_fn=_mock_hypothesize,
+            _summarize_fn=_mock_summarize,
+            _embedding_cache=cache_sentinel,
+        )
+        # Custom embedder was called, not the cache path
+        assert "custom_embedder" in calls

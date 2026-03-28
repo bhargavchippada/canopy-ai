@@ -66,6 +66,7 @@ class CDTNode:
         _validator: ValidateFn | None = None,
         _hypothesis_fn: HypothesisFn | None = None,
         _summarize_fn: SummarizeFn | None = None,
+        _embedding_cache: Any | None = None,
     ) -> None:
         self.statements: list[str] = []
         self.gates: list[str] = []
@@ -94,6 +95,7 @@ class CDTNode:
                 _validator,
                 _hypothesis_fn,
                 _summarize_fn,
+                _embedding_cache,
             )
 
     def _build(
@@ -108,25 +110,39 @@ class CDTNode:
         validator: ValidateFn | None,
         hypothesis_fn: HypothesisFn | None,
         summarize_fn: SummarizeFn | None,
+        embedding_cache: Any | None = None,
     ) -> None:
         """Build the tree node via hypothesis generation + validation."""
         from canopy.embeddings import select_cluster_centers
         from canopy.prompts import make_hypotheses_batch, summarize_triggers
         from canopy.validation import validate_hypothesis
 
-        _select_clusters = embedder or select_cluster_centers
         _validate = validator or validate_hypothesis
         _hypothesize = hypothesis_fn or make_hypotheses_batch
         _summarize = summarize_fn or summarize_triggers
 
-        clusters = _select_clusters(
-            character,
-            pairs,
-            n_in_cluster_case=16,
-            n_in_cluster_sample=8,
-            n_max_cluster=8,
-            bs=8,
-        )
+        # When embedding_cache is provided and no custom embedder override,
+        # pass cache through to select_cluster_centers for zero-GPU clustering
+        if embedder is not None:
+            _select_clusters = embedder
+            clusters = _select_clusters(
+                character,
+                pairs,
+                n_in_cluster_case=16,
+                n_in_cluster_sample=8,
+                n_max_cluster=8,
+                bs=8,
+            )
+        else:
+            clusters = select_cluster_centers(
+                character,
+                pairs,
+                n_in_cluster_case=16,
+                n_in_cluster_sample=8,
+                n_max_cluster=8,
+                bs=8,
+                embedding_cache=embedding_cache,
+            )
         log.info("Making hypotheses for %d clusters in parallel...", len(clusters))
         statement_candidates, gates = _hypothesize(
             clusters,
@@ -171,10 +187,11 @@ class CDTNode:
                             established_statements=established_statements + self.statements,
                             gate_path=gate_path + [gate],
                             config=cfg,
-                            _embedder=_select_clusters,
+                            _embedder=embedder,
                             _validator=_validate,
                             _hypothesis_fn=_hypothesize,
                             _summarize_fn=_summarize,
+                            _embedding_cache=embedding_cache,
                         )
                     )
                 else:
@@ -188,10 +205,11 @@ class CDTNode:
                             established_statements=established_statements + self.statements,
                             gate_path=gate_path + [gate],
                             config=cfg,
-                            _embedder=_select_clusters,
+                            _embedder=embedder,
                             _validator=_validate,
                             _hypothesis_fn=_hypothesize,
                             _summarize_fn=_summarize,
+                            _embedding_cache=embedding_cache,
                         )
                     )
 
@@ -263,20 +281,25 @@ def build_character_cdts(
     config: CDTConfig | None = None,
     *,
     max_parallel: int = 4,
+    embedding_cache: Any | None = None,
 ) -> tuple[dict[str, CDTNode], dict[str, CDTNode]]:
     """Build attribute and relationship CDTs for a character.
 
     Topics are built concurrently using a thread pool. Default ``max_parallel=4``
-    overlaps LLM API round-trips across topics. GPU inference is serialized
-    via threading.Lock in embeddings.py and validation.py. Values >1 parallelize LLM calls but GPU inference
-    is serialized via locks in ``canopy.embeddings`` and ``canopy.validation``.
+    overlaps LLM API round-trips across topics.
+
+    When ``embedding_cache`` is provided, no GPU models are loaded during tree
+    building — clustering uses pre-computed embeddings. This eliminates VRAM
+    contention and allows full parallelism.
 
     Args:
         character: Character name (e.g. "Kasumi").
-        pairs: Training scene-action pairs.
+        pairs: Training scene-action pairs. Must have ``_embed_idx`` keys when
+            ``embedding_cache`` is provided.
         other_characters: Other characters for relationship CDTs.
         config: CDT construction config. Uses defaults if None.
-        max_parallel: Maximum concurrent CDT builds. Default 1.
+        max_parallel: Maximum concurrent CDT builds. Default 4.
+        embedding_cache: Pre-computed embeddings from ``precompute_embeddings()``.
 
     Returns:
         (topic2cdt, rel_topic2cdt) — attribute and relationship CDT dicts.
@@ -312,6 +335,7 @@ def build_character_cdts(
                 goal_topic,
                 topic_pairs,
                 config=cfg,
+                _embedding_cache=embedding_cache,
             )
             futures[future] = (kind, goal_topic)
 
