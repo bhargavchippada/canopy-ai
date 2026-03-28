@@ -72,6 +72,16 @@ only controls the eval model. Key differences when we use Claude instead:
 - Ours (Claude): no suffix, no token limit, system prompt added, unbounded generation
 - Paper eval: GPT-4.1 with temperature=1e-8
 - Our eval: Claude Sonnet, no temperature control
+
+### Paper's Original CDT vs Ours (Same Eval Pipeline)
+
+| CDT | Gen+Eval | NLI Score | Notes |
+|-----|----------|-----------|-------|
+| Paper's original GPT-4.1 CDT | Sonnet+Sonnet | **65.87** | Baseline: paper CDT + our eval |
+| Our Sonnet v2 CDT (attr-only) | Sonnet+Sonnet | **67.66** | Our CDT EXCEEDS paper quality |
+| Our Sonnet v2 CDT (with rel) | Sonnet+Sonnet | 64.07 | Relationships hurt by -3.6 |
+
+**Conclusion:** The entire 18-point gap (66→84) is the benchmark pipeline (Llama gen + GPT-4.1 eval vs Claude gen + Claude eval), NOT CDT quality. Our CDT algorithm produces equal or better trees than the paper's GPT-4.1 CDT.
 - [x] Llama 8-bit gen + Sonnet eval — **55.99** (8-bit quantization quality loss)
 - [x] Llama fp16 gen + Sonnet eval — **~58.65** (killed at 62%, trending similar to Haiku gen)
 - [ ] CDT quality investigation (clustering, hypothesis quality, NLI validation per step)
