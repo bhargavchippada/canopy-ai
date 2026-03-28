@@ -61,6 +61,17 @@
 - [x] Sonnet CDT with Sonnet gen+eval — **66.17** (dominant factor confirmed)
 - [x] GPT-4.1 CDT with Sonnet gen+eval — **66.17** (identical to Sonnet CDT! CDT quality matches GPT-4.1)
 - [x] Haiku+Haiku — **50.00** (cheapest baseline, confirms eval model quality ladder)
+- [x] Sonnet v2 CDT (fixed summarize prompt, θ=0.8), attr-only, Sonnet+Sonnet — **67.66** (+1.5 from deeper trees)
+- [x] Sonnet v2 CDT, with relationships, Sonnet+Sonnet — **64.07** (relationships HURT by -3.6)
+
+### Critical Discovery: Paper Always Uses Llama for RP Gen
+
+The paper's `run_benchmark.py` hardcodes `generate_llama()` for RP generation. The `--engine` flag
+only controls the eval model. Key differences when we use Claude instead:
+- Paper: `prompt + "\nAnswer:"`, max_new_tokens=64, do_sample=False, stop at newline
+- Ours (Claude): no suffix, no token limit, system prompt added, unbounded generation
+- Paper eval: GPT-4.1 with temperature=1e-8
+- Our eval: Claude Sonnet, no temperature control
 - [x] Llama 8-bit gen + Sonnet eval — **55.99** (8-bit quantization quality loss)
 - [x] Llama fp16 gen + Sonnet eval — **~58.65** (killed at 62%, trending similar to Haiku gen)
 - [ ] CDT quality investigation (clustering, hypothesis quality, NLI validation per step)
