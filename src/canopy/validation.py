@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 from typing import Any
 
@@ -13,6 +14,7 @@ from tqdm import tqdm
 _classifier: Any = None
 _classifier_tokenizer: Any = None
 _device: torch.device | None = None
+_model_lock = threading.Lock()
 
 
 def init_models(discriminator_path: str, device: torch.device) -> None:
@@ -38,9 +40,10 @@ def check_scene(texts: list[str], questions: list[str]) -> list[bool | None]:
         for text, question in zip(texts, questions)
     ]
 
-    with torch.no_grad():
-        logits = _classifier(**_classifier_tokenizer(prompts, return_tensors="pt", padding=True).to(_device)).logits
-        choices = logits.argmax(-1)
+    with _model_lock:
+        with torch.no_grad():
+            logits = _classifier(**_classifier_tokenizer(prompts, return_tensors="pt", padding=True).to(_device)).logits
+            choices = logits.argmax(-1)
 
     return [[False, None, True][choice.item()] for choice in choices]
 
@@ -76,9 +79,10 @@ Directly answer only yes/no/unknown."""
         for action, statement in zip(actions, statements)
     ]
 
-    with torch.no_grad():
-        logits = _classifier(**_classifier_tokenizer(prompts, return_tensors="pt", padding=True).to(_device)).logits
-        probs = logits.softmax(-1).sum(0).detach().cpu().numpy()
+    with _model_lock:
+        with torch.no_grad():
+            logits = _classifier(**_classifier_tokenizer(prompts, return_tensors="pt", padding=True).to(_device)).logits
+            probs = logits.softmax(-1).sum(0).detach().cpu().numpy()
 
     return probs
 

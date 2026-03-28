@@ -181,6 +181,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to CDT package pkl. Required when method is 'cdt_package'.",
     )
+    parser.add_argument(
+        "--no-relationships",
+        action="store_true",
+        default=False,
+        help="Skip relationship CDTs during traversal (attribute topics only).",
+    )
 
     return parser
 
@@ -198,6 +204,7 @@ def evaluate(
     *,
     engine: str = HYPOTHESIS_MODEL,
     eval_engine: str = HYPOTHESIS_MODEL,
+    include_relationships: bool = True,
 ) -> int:
     """Evaluate a single scene-action pair.
 
@@ -235,7 +242,13 @@ def evaluate(
         with open(f"profiles/{character}.profile.txt", encoding="utf-8") as f:
             grounding = f.read()
     elif method == "cdt_package":
-        grounding = _build_cdt_grounding(character, scene, last_character, cdts)
+        grounding = _build_cdt_grounding(
+            character,
+            scene,
+            last_character,
+            cdts,
+            include_relationships=include_relationships,
+        )
     else:
         grounding = None
 
@@ -287,6 +300,8 @@ def _build_cdt_grounding(
     scene: str,
     last_character: list[str],
     cdts: dict[str, Any],
+    *,
+    include_relationships: bool = True,
 ) -> str:
     """Build grounding text by traversing CDT trees for the given scene."""
     topic2cdt = cdts["topic2cdt"]
@@ -296,6 +311,9 @@ def _build_cdt_grounding(
     for topic, cdt_tree in topic2cdt.items():
         statements.append(f"# {topic}")
         statements.extend(cdt_tree.traverse(scene))
+
+    if not include_relationships:
+        return "\n".join(statements)
 
     for c in last_character:
         topic = f"{character}'s interaction with {c}"
@@ -323,6 +341,7 @@ def benchmark(
     max_parallel: int = 6,
     return_list: bool = False,
     cdt_path: str | None = None,
+    include_relationships: bool = True,
 ) -> list[int] | float:
     """Run the full benchmark for a character.
 
@@ -389,6 +408,7 @@ def benchmark(
                 cdts,
                 engine=engine,
                 eval_engine=eval_engine,
+                include_relationships=include_relationships,
             )
             futures[future] = i
 
@@ -434,7 +454,7 @@ def benchmark(
             cdt_metadata=cdts.get("metadata") if cdts else None,
             score=final_score,
             per_pair_results=results,
-            has_relationships=bool(cdts.get("rel_topic2cdt")) if cdts else False,
+            has_relationships=(include_relationships and bool(cdts.get("rel_topic2cdt"))) if cdts else False,
         )
     except OSError as exc:
         log.error("Failed to save benchmark results: %s", exc)
@@ -465,6 +485,7 @@ def main() -> None:
         device_id=args.device_id,
         max_parallel=args.max_parallel,
         cdt_path=args.cdt_path,
+        include_relationships=not args.no_relationships,
     )
     log.info("Final NLI Score: %.2f", result)
 

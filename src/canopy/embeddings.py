@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import numpy as np
@@ -14,6 +15,7 @@ _surface_embedding: Any = None
 _generator_embedding: Any = None
 _generator_tokenizer: Any = None
 _device: torch.device | None = None
+_model_lock = threading.Lock()
 
 
 def init_models(
@@ -42,21 +44,25 @@ def generative_encode(texts: list[str]) -> np.ndarray:
     """Encode texts using the generative model's last hidden state."""
     if _generator_embedding is None:
         raise RuntimeError("Embedding models not initialized — call init_models() first")
-    embedding = _generator_embedding(
-        **_generator_tokenizer(texts, return_tensors="pt", padding=True).to(_device),
-        output_hidden_states=True,
-    ).hidden_states[-1][:, -1]
-    embedding = F.normalize(embedding, p=2, dim=1)
-    return embedding.detach().cpu().numpy()
+    with _model_lock:
+        with torch.no_grad():
+            embedding = _generator_embedding(
+                **_generator_tokenizer(texts, return_tensors="pt", padding=True).to(_device),
+                output_hidden_states=True,
+            ).hidden_states[-1][:, -1]
+            embedding = F.normalize(embedding, p=2, dim=1)
+            return embedding.detach().cpu().numpy()
 
 
 def surface_encode(texts: list[str]) -> np.ndarray:
     """Encode texts using the surface (sentence-transformer) model."""
     if _surface_embedding is None:
         raise RuntimeError("Embedding models not initialized — call init_models() first")
-    embedding = _surface_embedding.encode(texts, convert_to_tensor=True)
-    embedding = F.normalize(embedding, p=2, dim=1)
-    return embedding.detach().cpu().numpy()
+    with _model_lock:
+        with torch.no_grad():
+            embedding = _surface_embedding.encode(texts, convert_to_tensor=True)
+            embedding = F.normalize(embedding, p=2, dim=1)
+            return embedding.detach().cpu().numpy()
 
 
 def select_cluster_centers(
@@ -73,15 +79,14 @@ def select_cluster_centers(
 
     from canopy.cluster import KMeansCluster, select_representative_samples
 
-    with torch.no_grad():
-        batches: list[np.ndarray] = []
-        for idx in tqdm(range(0, len(actions), bs), desc="Embedding...", leave=True):
-            scenes_batch = [scene + f"\n\nThus, {character} decides to" for scene in scenes[idx : idx + bs]]
-            actions_batch = actions[idx : idx + bs]
-            batches.append(
-                np.concatenate([generative_encode(scenes_batch), surface_encode(actions_batch)], -1),
-            )
-        document_embeddings: np.ndarray = np.concatenate(batches, 0)
+    batches: list[np.ndarray] = []
+    for idx in tqdm(range(0, len(actions), bs), desc="Embedding...", leave=True):
+        scenes_batch = [scene + f"\n\nThus, {character} decides to" for scene in scenes[idx : idx + bs]]
+        actions_batch = actions[idx : idx + bs]
+        batches.append(
+            np.concatenate([generative_encode(scenes_batch), surface_encode(actions_batch)], -1),
+        )
+    document_embeddings: np.ndarray = np.concatenate(batches, 0)
 
     clusterer = KMeansCluster(n_in_cluster_case=n_in_cluster_case, n_max_cluster=n_max_cluster)
     _, centroids = clusterer.fit_predict(document_embeddings)

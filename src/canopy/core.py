@@ -262,25 +262,26 @@ def build_character_cdts(
     other_characters: list[str],
     config: CDTConfig | None = None,
     *,
-    max_parallel: int = 4,
+    max_parallel: int = 1,
 ) -> tuple[dict[str, CDTNode], dict[str, CDTNode]]:
     """Build attribute and relationship CDTs for a character.
 
-    Topics are built concurrently using a thread pool. Each topic's CDT
-    construction is independent (no shared mutable state), so parallelism
-    is safe. Set ``max_parallel`` conservatively when using large models
-    to avoid GPU OOM (e.g. ``max_parallel=1`` for 8B-parameter models).
+    Topics are built concurrently using a thread pool. Default ``max_parallel=1``
+    is safe for all models. Values >1 parallelize LLM calls but GPU inference
+    is serialized via locks in ``canopy.embeddings`` and ``canopy.validation``.
 
     Args:
         character: Character name (e.g. "Kasumi").
         pairs: Training scene-action pairs.
         other_characters: Other characters for relationship CDTs.
         config: CDT construction config. Uses defaults if None.
-        max_parallel: Maximum concurrent CDT builds. Default 4.
+        max_parallel: Maximum concurrent CDT builds. Default 1.
 
     Returns:
         (topic2cdt, rel_topic2cdt) — attribute and relationship CDT dicts.
     """
+    if max_parallel < 1:
+        raise ValueError(f"max_parallel must be >= 1, got {max_parallel}")
     cfg = config or CDTConfig()
 
     # Collect all tasks: (kind, goal_topic, topic_pairs)
@@ -292,12 +293,13 @@ def build_character_cdts(
 
     for other in other_characters:
         goal_topic = f"{character}'s interaction with {other}"
-        relation_pairs = [d for d in pairs if other in d["last_character"]]
+        relation_pairs = [d for d in pairs if other in d.get("last_character", [])]
         if len(relation_pairs) >= MIN_RELATION_PAIRS:
             tasks.append(("rel", goal_topic, relation_pairs))
 
     topic2cdt: dict[str, CDTNode] = {}
     rel_topic2cdt: dict[str, CDTNode] = {}
+    failed: list[str] = []
 
     with ThreadPoolExecutor(max_workers=max_parallel) as executor:
         futures = {}
@@ -323,5 +325,9 @@ def build_character_cdts(
                 log.info("Completed CDT: %s", goal_topic)
             except Exception:
                 log.exception("Failed to build CDT: %s", goal_topic)
+                failed.append(goal_topic)
+
+    if failed:
+        raise RuntimeError(f"CDT build failed for {len(failed)} topic(s): {failed}")
 
     return topic2cdt, rel_topic2cdt

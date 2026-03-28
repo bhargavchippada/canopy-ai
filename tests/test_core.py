@@ -406,8 +406,14 @@ class TestBuildCharacterCdts:
 
             mock_pool_cls.assert_called_once_with(max_workers=7)
 
+    def test_max_parallel_validation(self) -> None:
+        with pytest.raises(ValueError, match="max_parallel must be >= 1"):
+            build_character_cdts("Alice", [], [], max_parallel=0)
+        with pytest.raises(ValueError, match="max_parallel must be >= 1"):
+            build_character_cdts("Alice", [], [], max_parallel=-1)
+
     def test_build_character_cdts_handles_failure(self) -> None:
-        """A failing CDT build logs an exception but doesn't crash the batch."""
+        """A failing CDT build raises RuntimeError reporting the failed topic(s)."""
         call_count = 0
 
         def _failing_cdtnode(*args: Any, **kwargs: Any) -> CDTNode:
@@ -418,7 +424,5 @@ class TestBuildCharacterCdts:
             return CDTNode.__new__(CDTNode)
 
         with patch("canopy.core.CDTNode", side_effect=_failing_cdtnode):
-            # Should not raise — the failed topic is skipped
-            t, r = build_character_cdts("Alice", [], [], config=CDTConfig())
-        # 4 attribute topics, 1 fails → 3 succeed
-        assert len(t) == 3
+            with pytest.raises(RuntimeError, match="CDT build failed"):
+                build_character_cdts("Alice", [], [], config=CDTConfig())
