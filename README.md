@@ -63,17 +63,58 @@ See `examples/quickstart.py` for a complete example.
 - **Multiple clustering strategies** — KMeans (default) and HDBSCAN (density-based)
 - **Markdown wikification** — Convert CDT trees to readable profile documents
 
+## API Reference
+
+### Core Types
+
+| Type | Module | Description |
+|------|--------|-------------|
+| `BehavioralObservation` | `canopy.builder` | Frozen dataclass — scene, action, actor, participants, metadata |
+| `CDTConfig` | `canopy.core` | Frozen dataclass — max_depth, threshold_accept/reject/filter |
+| `CDTNode` | `canopy.core` | Tree node — statements, gates, children, traverse(), verbalize() |
+
+### Builder Functions
+
+| Function | Module | Description |
+|----------|--------|-------------|
+| `build_cdt(obs, character, topic, config)` | `canopy.builder` | Build one CDT from observations |
+| `build_character_profile(obs, character, ...)` | `canopy.builder` | Build full profile (4 attrs + relationships) |
+| `build_character_cdts(character, pairs, others, config)` | `canopy.core` | Low-level builder from raw pairs |
+
+### Wikification
+
+| Function | Module | Description |
+|----------|--------|-------------|
+| `wikify_tree(node, title)` | `canopy.wikify` | Single CDT → markdown section |
+| `wikify_profile(topics, rels, character)` | `canopy.wikify` | Full profile → markdown document |
+
+### Clustering
+
+| Class | Module | Description |
+|-------|--------|-------------|
+| `KMeansCluster` | `canopy.cluster` | KMeans with auto-k (default) |
+| `HDBSCANCluster` | `canopy.cluster` | Density-based, discovers k from data |
+
+### LLM Adapter
+
+| Function/Class | Module | Description |
+|----------------|--------|-------------|
+| `ClaudeCodeAdapter` | `canopy.llm` | Claude via claude-agent-sdk (Max sub) |
+| `set_adapter(adapter)` | `canopy.llm` | Swap default LLM adapter |
+| `generate(prompt, model)` | `canopy.llm` | Single LLM call |
+| `generate_many(prompts, model)` | `canopy.llm` | Parallel LLM calls |
+
 ## Testing
 
 ```bash
-uv run python -m pytest                         # Unit tests (~140 tests, ~10s)
-uv run python -m pytest -m integration          # Integration tests (11 tests, ~23s, needs GPU)
-uv run python -m pytest --cov=canopy       # With coverage report
+uv run python -m pytest                    # Unit tests (138 tests, ~10s)
+uv run python -m pytest -m integration     # Integration tests (11 tests, ~23s, needs GPU)
+uv run python -m pytest --cov=canopy       # Coverage report
 ```
 
 ## Status
 
-**Phase 2: Core Library API** — Importable package with BehavioralObservation, builder, wikify, clustering.
+**Phase 3: COMPLETE** — Full library API with 149 tests, 97% combined coverage.
 
 ## Attribution
 

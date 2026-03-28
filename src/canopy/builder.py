@@ -59,13 +59,16 @@ class BehavioralObservation:
             "scene": self.scene,
             "action": self.action,
             "characters": [self.actor, *self.participants],
-            "last_character": self.participants or [self.actor],
+            "last_character": list(self.participants) if self.participants else [self.actor],
         })
         return pair
 
 
-def observations_to_pairs(observations: list[BehavioralObservation]) -> list[dict[str, Any]]:
-    """Convert BehavioralObservations to legacy pair dicts for CDTNode."""
+def _observations_to_pairs(observations: list[BehavioralObservation]) -> list[dict[str, Any]]:
+    """Convert BehavioralObservations to legacy pair dicts for CDTNode.
+
+    Internal helper — external callers should use build_cdt() or build_character_profile().
+    """
     return [obs.to_pair() for obs in observations]
 
 
@@ -89,7 +92,7 @@ def build_cdt(
     Returns:
         A CDTNode tree rooted at the given topic.
     """
-    pairs = observations_to_pairs(observations)
+    pairs = _observations_to_pairs(observations)
     cfg = config or CDTConfig()
     log.info("Building CDT for %s / %s (%d observations)", character, topic, len(pairs))
     return CDTNode(character, topic, pairs, config=cfg)
@@ -115,7 +118,7 @@ def build_character_profile(
     Returns:
         (topic2cdt, rel_topic2cdt) — attribute and relationship CDT dicts.
     """
-    pairs = observations_to_pairs(observations)
+    pairs = _observations_to_pairs(observations)
 
     if other_characters is None:
         # Extract unique participants from observations

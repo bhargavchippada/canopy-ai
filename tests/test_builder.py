@@ -6,9 +6,9 @@ import pytest
 
 from canopy.builder import (
     BehavioralObservation,
+    _observations_to_pairs,
     build_cdt,
     build_character_profile,
-    observations_to_pairs,
 )
 from canopy.core import CDTConfig, CDTNode
 
@@ -61,7 +61,7 @@ class TestBehavioralObservation:
         assert pair["scene"] == "at stage"
         assert pair["action"] == "plays guitar"
         assert pair["characters"] == ["Kasumi", "Arisa"]
-        assert pair["last_character"] == ("Arisa",)
+        assert pair["last_character"] == ["Arisa"]
         assert pair["title"] == "ep5"
 
     def test_to_pair_no_participants(self) -> None:
@@ -82,27 +82,27 @@ class TestBehavioralObservation:
 
 
 # ---------------------------------------------------------------------------
-# observations_to_pairs
+# _observations_to_pairs
 # ---------------------------------------------------------------------------
 
 
 class TestObservationsToPairs:
     def test_empty(self) -> None:
-        assert observations_to_pairs([]) == []
+        assert _observations_to_pairs([]) == []
 
     def test_conversion(self) -> None:
         obs = [
             BehavioralObservation(scene="s1", action="a1", actor="Alice"),
             BehavioralObservation(scene="s2", action="a2", actor="Bob"),
         ]
-        pairs = observations_to_pairs(obs)
+        pairs = _observations_to_pairs(obs)
         assert len(pairs) == 2
         assert pairs[0]["scene"] == "s1"
         assert pairs[1]["actor"] if "actor" in pairs[1] else pairs[1]["characters"][0] == "Bob"
 
     def test_metadata_preserved(self) -> None:
         obs = [BehavioralObservation(scene="s", action="a", actor="X", metadata={"k": "v"})]
-        pairs = observations_to_pairs(obs)
+        pairs = _observations_to_pairs(obs)
         assert pairs[0]["k"] == "v"
 
 
