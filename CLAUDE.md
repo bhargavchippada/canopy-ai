@@ -35,7 +35,7 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 - **LLM Model:** claude-haiku-4-5 (hypothesis gen), claude-sonnet-4-6 (evaluation)
 - **Embeddings:** Qwen3-0.6B (smoke test) / Qwen3-8B (full run)
 - **NLI:** DeBERTa-v3-base-rp-nli
-- **Testing:** pytest (173 unit + 11 integration = 184 tests)
+- **Testing:** pytest (214 unit + 13 integration = 227 tests)
 - **Linting:** ruff
 
 ## Library API
@@ -63,7 +63,15 @@ topic2cdt, rel_topic2cdt = build_character_profile(obs, character="Alice")
 # 5. Wikify to markdown
 markdown = wikify_profile(topic2cdt, rel_topic2cdt, character="Alice")
 
-# 6. Batch LLM generation with drop tracking
+# 6. Pre-compute embeddings with subprocess isolation (for 8B models)
+from canopy.embeddings import precompute_embeddings
+cache = precompute_embeddings("Alice", pairs, "/path/to/surface", "/path/to/gen")
+indexed_pairs = [{**p, "_embed_idx": i} for i, p in enumerate(pairs)]
+topic2cdt, rel_topic2cdt = build_character_profile(
+    obs, character="Alice", embedding_cache=cache,
+)
+
+# 7. Batch LLM generation with drop tracking
 from canopy.llm import batch_generate, BatchResult
 result = batch_generate([("id1", "prompt1"), ("id2", "prompt2")])
 print(result.successes, result.exhausted_ids, result.success_rate)
@@ -73,8 +81,8 @@ print(result.successes, result.exhausted_ids, result.success_rate)
 
 ```bash
 uv sync                                           # Install dependencies
-uv run python -m pytest                           # Unit tests (173, ~10s)
-uv run python -m pytest -m integration            # GPU integration tests (11, ~23s)
+uv run python -m pytest                           # Unit tests (214, ~10s)
+uv run python -m pytest -m integration            # GPU integration tests (13, ~23s)
 uv run python -m pytest --cov=canopy              # Coverage report
 uv run ruff check src/canopy/                     # Lint
 
@@ -109,33 +117,34 @@ Models stored in `~/models/`:
 | Qwen3-Embedding-0.6B | `~/models/Qwen3-Embedding-0.6B` | ~1.2GB | Surface embedding |
 | Qwen3-0.6B | `~/models/Qwen3-0.6B` | ~1.2GB | Generative embedding |
 
-**VRAM (RTX 5090, 32GB):** 0.6B models use ~3.1GB total. 8B models need sequential loading.
+**VRAM (RTX 5090, 32GB):** 0.6B models use ~3.1GB total. 8B models use two-phase subprocess isolation (each model loads once in a subprocess, exits to release VRAM).
 
 ## Project Structure
 
 ```
 canopy-ai/
-├── src/canopy/                # Core package (11 modules)
-│   ├── __init__.py            # Exports: CDTConfig, CDTNode, BehavioralObservation, build_*
+├── src/canopy/                # Core package (12 modules)
+│   ├── __init__.py            # Exports: CDTConfig, CDTNode, BehavioralObservation, EmbeddingCache
 │   ├── core.py                # CDTNode, CDTConfig, build_character_cdts
 │   ├── builder.py             # BehavioralObservation, build_cdt, build_character_profile
 │   ├── wikify.py              # CDT → markdown (wikify_tree, wikify_profile)
 │   ├── cluster.py             # KMeansCluster, HDBSCANCluster, ClusterStrategy Protocol
-│   ├── embeddings.py          # Model loading, encoding (delegates to cluster.py)
+│   ├── embeddings.py          # EmbeddingCache, precompute_embeddings, select_cluster_centers
+│   ├── _embed_worker.py       # Subprocess entry point for VRAM-isolated encoding
 │   ├── validation.py          # NLI-based scene/statement checking (DeBERTa)
 │   ├── prompts.py             # LLM hypothesis generation + summarization
 │   ├── llm.py                 # LLM adapter (Protocol + ClaudeCodeAdapter + batch_generate)
 │   ├── data.py                # HuggingFace dataset loading + caching
 │   └── cli.py                 # CLI entry point
-├── tests/                     # 184 tests (173 unit + 11 integration)
+├── tests/                     # 227 tests (214 unit + 13 integration)
 │   ├── conftest.py            # GPU skip guard, integration deselection
-│   ├── test_core.py           # CDTNode, CDTConfig, build_character_cdts
+│   ├── test_core.py           # CDTNode, CDTConfig, build_character_cdts, cache forwarding
 │   ├── test_builder.py        # BehavioralObservation, build_cdt
 │   ├── test_wikify.py         # wikify_tree, wikify_profile
 │   ├── test_cluster.py        # KMeans, HDBSCAN, representative samples
 │   ├── test_llm.py            # Adapter, extract_json, retry, session
 │   ├── test_data.py           # Metadata loading, pair extraction
-│   ├── test_embeddings.py     # Guard tests
+│   ├── test_embeddings.py     # EmbeddingCache, precompute, subprocess, cache path
 │   ├── test_validation.py     # Guard tests
 │   └── test_integration.py    # GPU tests (embeddings, validation, pipeline)
 ├── examples/                  # Usage examples
@@ -158,6 +167,7 @@ canopy-ai/
 
 Optimizations: tools=[], setting_sources=[], Haiku model, asyncio.gather parallelism.
 Phase 4 additions: `batch_generate()` with retry/drop tracking, `ThreadPoolExecutor` parallel benchmark (--max_parallel).
+Phase 5 additions: Two-phase embedding architecture — each 8B model loads ONCE in a subprocess (OS reclaims VRAM on exit), then tree building uses pre-computed numpy arrays with zero GPU model loading. Eliminates OOM with 8B models on 32GB GPUs.
 
 ## Benchmark Results
 
