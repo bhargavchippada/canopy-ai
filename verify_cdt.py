@@ -1,13 +1,16 @@
 """Verify a CDT package: print structure, stats, and test traversal."""
 
+from __future__ import annotations
+
 import pickle
 import sys
 import types
 from copy import deepcopy
 
 
-# Minimal CDT_Node for unpickling (avoids importing the full module)
-class CDT_Node:
+class _LegacyCDTNode:
+    """Minimal CDT_Node for unpickling old packages (pickled as __main__.CDT_Node)."""
+
     statements: list
     gates: list
     children: list
@@ -16,13 +19,12 @@ class CDT_Node:
     def traverse(self, scene: str) -> list[str]:
         statements = deepcopy(self.statements)
         for gate, child in zip(self.gates, self.children):
-            # Skip gate checking in verification — just collect all
             statements.extend(child.traverse(scene))
         return statements
 
     def verbalize(self, indent: int = 0) -> str:
         prefix = "  " * indent
-        lines = []
+        lines: list[str] = []
         for s in self.statements:
             lines.append(f"{prefix}- {s}")
         for gate, child in zip(self.gates, self.children):
@@ -48,18 +50,32 @@ class CDT_Node:
         return stats
 
 
-# Register the class for pickle
-mod = types.ModuleType("__main__")
-mod.CDT_Node = CDT_Node
-sys.modules["__main__"] = mod
+def _register_unpickle_classes() -> None:
+    """Register CDTNode classes so pickle can find them regardless of how they were saved."""
+    # Old packages saved as __main__.CDT_Node
+    mod_main = types.ModuleType("__main__")
+    mod_main.CDT_Node = _LegacyCDTNode
+    sys.modules["__main__"] = mod_main
 
-# Also register as codified_decision_tree.CDT_Node
-mod2 = types.ModuleType("codified_decision_tree")
-mod2.CDT_Node = CDT_Node
-sys.modules["codified_decision_tree"] = mod2
+    # Old packages saved as codified_decision_tree.CDT_Node
+    mod_cdt = types.ModuleType("codified_decision_tree")
+    mod_cdt.CDT_Node = _LegacyCDTNode
+    sys.modules["codified_decision_tree"] = mod_cdt
+
+    # New packages saved as canopy.core.CDTNode
+    try:
+        from canopy.core import CDTNode
+        # Monkey-patch count_stats and verbalize onto CDTNode if missing
+        if not hasattr(CDTNode, "count_stats"):
+            CDTNode.count_stats = _LegacyCDTNode.count_stats
+        if not hasattr(CDTNode, "verbalize"):
+            pass  # CDTNode already has verbalize
+    except ImportError:
+        pass
 
 
 def load_package(path: str) -> dict:
+    _register_unpickle_classes()
     with open(path, "rb") as f:
         return pickle.load(f)
 
@@ -69,7 +85,7 @@ def verify_package(path: str) -> dict:
     topic2cdt = data["topic2cdt"]
     rel_topic2cdt = data["rel_topic2cdt"]
 
-    results = {"topics": {}, "relationships": {}, "totals": {}}
+    results: dict = {"topics": {}, "relationships": {}, "totals": {}}
     grand_statements = 0
     grand_gates = 0
     grand_nodes = 0
@@ -78,7 +94,6 @@ def verify_package(path: str) -> dict:
     print(f"CDT Package: {path}")
     print("=" * 80)
 
-    # Attribute topics
     print("\n## Attribute Topics\n")
     for topic, cdt in topic2cdt.items():
         stats = cdt.count_stats()
@@ -94,12 +109,10 @@ def verify_package(path: str) -> dict:
         print(f"  Total statements: {stats['total_statements']}")
         print(f"  Total gates: {stats['total_gates']}")
         print(f"  Max depth: {stats['max_depth']}")
-        print()
-        print(f"  Tree structure:")
+        print(f"\n  Tree structure:")
         print(cdt.verbalize(indent=2))
         print()
 
-    # Relationship topics
     print("\n## Relationship Topics\n")
     for topic, cdt in rel_topic2cdt.items():
         stats = cdt.count_stats()
@@ -115,12 +128,10 @@ def verify_package(path: str) -> dict:
         print(f"  Total statements: {stats['total_statements']}")
         print(f"  Total gates: {stats['total_gates']}")
         print(f"  Max depth: {stats['max_depth']}")
-        print()
-        print(f"  Tree structure:")
+        print(f"\n  Tree structure:")
         print(cdt.verbalize(indent=2))
         print()
 
-    # Grand totals
     results["totals"] = {
         "attribute_topics": len(topic2cdt),
         "relationship_topics": len(rel_topic2cdt),
@@ -138,7 +149,7 @@ def verify_package(path: str) -> dict:
     print(f"  Total nodes: {grand_nodes}")
     print("=" * 80)
 
-    # Test traversal
+    # Traversal test
     print("\n## Traversal Test\n")
     test_scene = (
         "Kasumi looked around at the empty stage.\n"
