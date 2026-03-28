@@ -128,7 +128,7 @@ class CDTNode:
 
         for gate, stmt in zip(gates, statement_candidates):
             res, _ = _validate(character, pairs, None, stmt)
-            correctness = res["True"] / (res["True"] + res["False"] + 1e-8) + 1e-8
+            correctness = res.get("True", 0) / (res.get("True", 0) + res.get("False", 0) + 1e-8) + 1e-8
             if correctness >= cfg.threshold_accept:
                 global_statements.append(stmt)
             else:
@@ -139,8 +139,8 @@ class CDTNode:
 
         for gate, stmt in zip(remained_gates, gated_statements):
             res, filtered_pairs = _validate(character, pairs, gate, stmt)
-            correctness = res["True"] / (res["True"] + res["False"] + 1e-8) + 1e-8
-            broadness = 1 - res["Irrelevant"] / sum(res.values())
+            correctness = res.get("True", 0) / (res.get("True", 0) + res.get("False", 0) + 1e-8) + 1e-8
+            broadness = 1 - res.get("Irrelevant", 0) / (sum(res.values()) + 1e-8)
             if broadness <= cfg.threshold_filter:
                 if correctness <= cfg.threshold_reject:
                     continue
