@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from canopy.llm import extract_json, generate, generate_many
 
@@ -10,7 +11,7 @@ log = logging.getLogger(__name__)
 
 
 def make_hypothesis_prompt(
-    cluster: list[dict],
+    cluster: list[dict[str, Any]],
     character: str,
     goal_topic: str,
     established_statements: list[str],
@@ -21,8 +22,8 @@ def make_hypothesis_prompt(
     action_scene_context = "\n\n".join(
         ["# Scene:\n" + pair["scene"] + "\n# Action:\n" + pair["action"] for pair in cluster],
     )
-    established_statement_verbalized = "\n".join(established_statements) if len(established_statements) > 0 else "N/A"
-    gate_path_verbalized = "\n".join(gate_path) if len(gate_path) > 0 else "N/A"
+    established_statement_verbalized = "\n".join(established_statements) if established_statements else "N/A"
+    gate_path_verbalized = "\n".join(gate_path) if gate_path else "N/A"
 
     return f"""# Scene-Action Pairs
 {action_scene_context}
@@ -73,7 +74,7 @@ def parse_hypothesis_response(response: str) -> tuple[list[str], list[str]]:
 
 
 def make_hypotheses_batch(
-    clusters: list[list[dict]],
+    clusters: list[list[dict[str, Any]]],
     character: str,
     goal_topic: str,
     established_statements: list[str],

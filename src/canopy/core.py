@@ -137,9 +137,6 @@ class CDTNode:
 
         self.statements.extend(global_statements)
 
-        deps = dict(_embedder=_select_clusters, _validator=_validate,
-                     _hypothesis_fn=_hypothesize, _summarize_fn=_summarize)
-
         for gate, stmt in zip(remained_gates, gated_statements):
             res, filtered_pairs = _validate(character, pairs, gate, stmt)
             correctness = res["True"] / (res["True"] + res["False"] + 1e-8) + 1e-8
@@ -156,7 +153,10 @@ class CDTNode:
                         established_statements=established_statements + self.statements,
                         gate_path=gate_path + [gate],
                         config=cfg,
-                        **deps,
+                        _embedder=_select_clusters,
+                        _validator=_validate,
+                        _hypothesis_fn=_hypothesize,
+                        _summarize_fn=_summarize,
                     ))
                 else:
                     self.gates.append(gate)
@@ -166,7 +166,10 @@ class CDTNode:
                         established_statements=established_statements + self.statements,
                         gate_path=gate_path + [gate],
                         config=cfg,
-                        **deps,
+                        _embedder=_select_clusters,
+                        _validator=_validate,
+                        _hypothesis_fn=_hypothesize,
+                        _summarize_fn=_summarize,
                     ))
 
     def traverse(self, scene: str) -> list[str]:

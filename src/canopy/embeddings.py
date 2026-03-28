@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
 # Module-level model references — set by init_models()
-_surface_embedding = None
-_generator_embedding = None
-_generator_tokenizer = None
-_device = None
+_surface_embedding: Any = None
+_generator_embedding: Any = None
+_generator_tokenizer: Any = None
+_device: torch.device | None = None
 
 
 def init_models(
@@ -59,12 +61,12 @@ def surface_encode(texts: list[str]) -> np.ndarray:
 
 def select_cluster_centers(
     character: str,
-    pairs: list[dict],
+    pairs: list[dict[str, Any]],
     n_in_cluster_case: int = 16,
     n_in_cluster_sample: int = 8,
     n_max_cluster: int = 8,
     bs: int = 8,
-) -> list[list[dict]]:
+) -> list[list[dict[str, Any]]]:
     """Cluster scene-action pairs and return representative samples per cluster."""
     actions = [pair["action"] for pair in pairs]
     scenes = [pair["scene"] for pair in pairs]
@@ -72,14 +74,14 @@ def select_cluster_centers(
     from canopy.cluster import KMeansCluster, select_representative_samples
 
     with torch.no_grad():
-        document_embeddings = []
+        batches: list[np.ndarray] = []
         for idx in tqdm(range(0, len(actions), bs), desc="Embedding...", leave=True):
             scenes_batch = [scene + f"\n\nThus, {character} decides to" for scene in scenes[idx : idx + bs]]
             actions_batch = actions[idx : idx + bs]
-            document_embeddings.append(
+            batches.append(
                 np.concatenate([generative_encode(scenes_batch), surface_encode(actions_batch)], -1),
             )
-        document_embeddings = np.concatenate(document_embeddings, 0)
+        document_embeddings: np.ndarray = np.concatenate(batches, 0)
 
     clusterer = KMeansCluster(n_in_cluster_case=n_in_cluster_case, n_max_cluster=n_max_cluster)
     _, centroids = clusterer.fit_predict(document_embeddings)

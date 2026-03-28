@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import Any
 
 import numpy as np
 import torch
 from tqdm import tqdm
 
 # Module-level model references — set by init_models()
-_classifier = None
-_classifier_tokenizer = None
-_device = None
+_classifier: Any = None
+_classifier_tokenizer: Any = None
+_device: torch.device | None = None
 
 
 def init_models(discriminator_path: str, device: torch.device) -> None:
@@ -84,17 +85,17 @@ Directly answer only yes/no/unknown."""
 
 def validate_hypothesis(
     character: str,
-    pairs: list[dict],
+    pairs: list[dict[str, Any]],
     hypothesized_question: str | None,
     hypothesized_action: str,
     bs: int = 64,
-) -> tuple[dict[str, float], list[dict]]:
+) -> tuple[dict[str, float], list[dict[str, Any]]]:
     """Validate a hypothesis against all pairs.
 
     Returns (result_counts, filtered_pairs).
     """
-    res: dict[str, float] = defaultdict(int)
-    filtered_pairs: list[dict] = []
+    res: defaultdict[str, float] = defaultdict(int)
+    filtered_pairs: list[dict[str, Any]] = []
     relevance_all: list[bool | None] = []
 
     for idx in tqdm(range(0, len(pairs), bs), desc="Filtering Scenes...", leave=True):
@@ -102,7 +103,7 @@ def validate_hypothesis(
         scenes = [pair["scene"] for pair in pairs_batch]
 
         if hypothesized_question is None:
-            relevance = [True for _ in pairs_batch]
+            relevance: list[bool | None] = [True for _ in pairs_batch]
         else:
             relevance = check_scene(scenes, [hypothesized_question] * len(pairs_batch))
         relevance_all.extend(relevance)
@@ -121,4 +122,4 @@ def validate_hypothesis(
         res["None"] += score[1]
         res["True"] += score[2]
 
-    return res, filtered_pairs
+    return dict(res), filtered_pairs

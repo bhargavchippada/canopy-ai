@@ -5,17 +5,18 @@ from __future__ import annotations
 import json
 import os
 from collections import defaultdict
+from typing import Any
 
 
 def load_character_metadata(
     characters_path: str = "all_characters.json",
     bands_path: str = "band2members.json",
-) -> tuple[dict, dict, dict]:
+) -> tuple[dict[str, Any], dict[str, str], dict[str, Any]]:
     """Load character → artifact mapping and band membership.
 
     Returns (all_characters, character2artifact, band2members).
     """
-    with open(characters_path) as f:
+    with open(characters_path, encoding="utf-8") as f:
         all_characters = json.load(f)
 
     character2artifact = {
@@ -24,7 +25,7 @@ def load_character_metadata(
         for character in all_characters[artifact]["major"]
     }
 
-    with open(bands_path) as f:
+    with open(bands_path, encoding="utf-8") as f:
         band2members = json.load(f)
 
     return all_characters, character2artifact, band2members
@@ -32,11 +33,11 @@ def load_character_metadata(
 
 def load_ar_pairs(
     character: str,
-    character2artifact: dict,
-    band2members: dict,
+    character2artifact: dict[str, str],
+    band2members: dict[str, Any],
     data_dir: str = "data",
     scene_window: int = 10,
-) -> dict[str, list[dict]]:
+) -> dict[str, list[dict[str, Any]]]:
     """Load action-reaction pairs for a character from HuggingFace datasets.
 
     Returns {"train": [...], "test": [...]}, split 50/50.
@@ -59,10 +60,10 @@ def load_ar_pairs(
                 title2action_series[data["title"]].append(data)
 
         os.makedirs(data_dir, exist_ok=True)
-        with open(cache_path, "w") as f:
+        with open(cache_path, "w", encoding="utf-8") as f:
             json.dump(title2action_series, f)
     else:
-        with open(cache_path) as f:
+        with open(cache_path, encoding="utf-8") as f:
             title2action_series = json.load(f)
 
     all_actions: list[str] = []

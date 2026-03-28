@@ -155,7 +155,8 @@ class ClaudeCodeAdapter:
         """
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, TextBlock
 
-        assert self._client_lock is not None
+        if self._client_lock is None:
+            raise RuntimeError("_session_generate requires reuse_session=True")
         async with self._client_lock:
             if self._client is None:
                 options = ClaudeAgentOptions(
