@@ -113,14 +113,14 @@ See `examples/quickstart.py` for a complete example.
 ## Testing
 
 ```bash
-uv run python -m pytest                    # Unit tests (156 tests, ~10s)
+uv run python -m pytest                    # Unit tests (173 tests, ~10s)
 uv run python -m pytest -m integration     # Integration tests (11 tests, ~23s, needs GPU)
 uv run python -m pytest --cov=canopy       # Coverage report
 ```
 
 ## Status
 
-**Phase 4: COMPLETE** — All legacy files migrated, batch LLM, parallel benchmark, 167 tests.
+**Phase 4: COMPLETE** — All legacy files migrated, batch LLM, parallel benchmark, 184 tests.
 
 ## Attribution
 

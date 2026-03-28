@@ -17,7 +17,7 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 
 ## Design Reference
 
-**Authoritative CDT design:** `artifacts/canopy-design.md` (25 design decisions D1-D25)
+**Authoritative CDT design:** `artifacts/canopy-design.md` (design decisions D1-D30)
 
 ## Principles
 
@@ -29,13 +29,13 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 
 ## Tech Stack
 
-- **Language:** Python 3.13+
+- **Language:** Python 3.11+
 - **Package manager:** uv (NEVER pip)
 - **LLM:** Claude via claude-agent-sdk (Max subscription, no API key)
 - **LLM Model:** claude-haiku-4-5 (hypothesis gen), claude-sonnet-4-6 (evaluation)
 - **Embeddings:** Qwen3-0.6B (smoke test) / Qwen3-8B (full run)
 - **NLI:** DeBERTa-v3-base-rp-nli
-- **Testing:** pytest (156 unit + 11 integration = 167 tests)
+- **Testing:** pytest (173 unit + 11 integration = 184 tests)
 - **Linting:** ruff
 
 ## Library API
@@ -73,7 +73,7 @@ print(result.successes, result.exhausted_ids, result.success_rate)
 
 ```bash
 uv sync                                           # Install dependencies
-uv run python -m pytest                           # Unit tests (156, ~10s)
+uv run python -m pytest                           # Unit tests (173, ~10s)
 uv run python -m pytest -m integration            # GPU integration tests (11, ~23s)
 uv run python -m pytest --cov=canopy              # Coverage report
 uv run ruff check src/canopy/                     # Lint
@@ -115,7 +115,7 @@ Models stored in `~/models/`:
 
 ```
 canopy-ai/
-├── src/canopy/                # Core package (9 modules)
+├── src/canopy/                # Core package (11 modules)
 │   ├── __init__.py            # Exports: CDTConfig, CDTNode, BehavioralObservation, build_*
 │   ├── core.py                # CDTNode, CDTConfig, build_character_cdts
 │   ├── builder.py             # BehavioralObservation, build_cdt, build_character_profile
@@ -125,8 +125,9 @@ canopy-ai/
 │   ├── validation.py          # NLI-based scene/statement checking (DeBERTa)
 │   ├── prompts.py             # LLM hypothesis generation + summarization
 │   ├── llm.py                 # LLM adapter (Protocol + ClaudeCodeAdapter + batch_generate)
-│   └── data.py                # HuggingFace dataset loading + caching
-├── tests/                     # 167 tests (156 unit + 11 integration)
+│   ├── data.py                # HuggingFace dataset loading + caching
+│   └── cli.py                 # CLI entry point
+├── tests/                     # 184 tests (173 unit + 11 integration)
 │   ├── conftest.py            # GPU skip guard, integration deselection
 │   ├── test_core.py           # CDTNode, CDTConfig, build_character_cdts
 │   ├── test_builder.py        # BehavioralObservation, build_cdt

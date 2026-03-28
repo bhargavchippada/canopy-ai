@@ -665,7 +665,7 @@ All CDT-specific configuration values with defaults and valid ranges.
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
-| `cdt_accept_threshold` | 0.75 | 0.5-1.0 | Confidence threshold for accepting a hypothesis |
+| `cdt_accept_threshold` | 0.75 | 0.5-1.0 | Confidence threshold for accepting a hypothesis. **Note:** Code default is 0.80; paper config uses 0.75 (see D30). |
 | `cdt_reject_threshold` | 0.50 | 0.0-0.75 | Confidence threshold for rejecting a hypothesis |
 | `cdt_max_validation_items` | 500 | 50-5000 | Max evidence items per cluster for validation |
 
@@ -1088,6 +1088,8 @@ Each mode can be run independently or in any combination. Canopy provides the ev
 ### D24: Default embedding model all-MiniLM-L6-v2
 
 **Decision:** Default embedding model is `all-MiniLM-L6-v2` (80MB, fast, offline). Configurable via `embedding_model` config.
+
+**Note:** Actual deployment uses Qwen3 models — Qwen3-Embedding-0.6B for surface embeddings and Qwen3-0.6B for generative embeddings. The all-MiniLM-L6-v2 default in this design doc predates the migration to Qwen3.
 
 **Rationale:** Good enough for natural language behavioral summaries. Small model size enables offline operation and fast embedding. Code-aware models (e.g., `code-search-ada`) are available as overrides for code-heavy domains but are not the default — most behavioral observations are natural language descriptions, not raw code.
 
