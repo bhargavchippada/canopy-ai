@@ -74,6 +74,8 @@ class ClaudeCodeAdapter:
     - Timeout protection
     """
 
+    _DEFAULT_SYSTEM_PROMPT = "You are a helpful AI assistant. Respond directly to the prompt."
+
     def __init__(
         self,
         default_model: str = DEFAULT_MODEL,
@@ -81,12 +83,14 @@ class ClaudeCodeAdapter:
         max_concurrent: int = 8,
         max_retries: int = 2,
         reuse_session: bool = False,
+        system_prompt: str | None = _DEFAULT_SYSTEM_PROMPT,
     ) -> None:
         self._default_model = default_model
         self._timeout = timeout
         self._max_concurrent = max_concurrent
         self._max_retries = max_retries
         self._reuse_session = reuse_session
+        self._system_prompt = system_prompt
         # Session client (lazy-initialized when reuse_session=True)
         self._client: Any = None
         self._client_lock = asyncio.Lock() if reuse_session else None
@@ -147,7 +151,7 @@ class ClaudeCodeAdapter:
         options = ClaudeAgentOptions(
             model=model,
             max_turns=1,
-            system_prompt="You are a helpful AI assistant. Respond directly to the prompt.",
+            system_prompt=self._system_prompt,
             # tools=[] means no tool invocations are possible.
             # bypassPermissions is safe ONLY because tools=[].
             tools=[],
@@ -198,7 +202,7 @@ class ClaudeCodeAdapter:
                 options = ClaudeAgentOptions(
                     model=model,
                     max_turns=1,
-                    system_prompt="You are a helpful AI assistant. Respond directly to the prompt.",
+                    system_prompt=self._system_prompt,
                     tools=[],
                     permission_mode="bypassPermissions",
                     setting_sources=[],

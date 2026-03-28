@@ -80,7 +80,7 @@ def main() -> None:
     device = torch.device(f"cuda:{args.device_id}")
 
     # Configure LLM adapter
-    set_adapter(ClaudeCodeAdapter(default_model=args.engine))
+    set_adapter(ClaudeCodeAdapter(default_model=args.engine, system_prompt=None))
 
     # Load validation model (DeBERTa ~715MB — stays in main process)
     log.info("Loading validation model...")
