@@ -547,7 +547,7 @@ def benchmark(
     if multi_eval:
         eval_engines = [HYPOTHESIS_MODEL, EVAL_MODEL]
         log.info("Multi-eval mode: evaluating with %s", eval_engines)
-        multi_results: list[dict[str, Any] | None] = [None] * total
+        multi_results = [None] * total  # type: list[dict[str, Any] | None]
 
         with ThreadPoolExecutor(max_workers=max_parallel) as executor:
             futures = {}
