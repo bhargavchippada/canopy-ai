@@ -174,6 +174,9 @@ Phase 5 additions: Two-phase embedding architecture — each 8B model loads ONCE
 | CDT Source | Gen Model | Eval Model | NLI Score | Paper Score | Notes |
 |-----------|-----------|------------|-----------|-------------|-------|
 | Kasumi (GPT-4.1 CDT) | Haiku | Sonnet | 61.98 | 84.25 | Gap from model swap (Claude vs GPT-4.1/Llama) |
+| Kasumi (Claude CDT, 0.6B, θ=0.80) | Haiku | Sonnet | 43.11 | 84.25 | With relationships |
+| Kasumi (Claude CDT, 0.6B, θ=0.80) | Haiku | Sonnet | 41.32 | 84.25 | Without relationships |
+| Kasumi (Claude CDT, 8B, θ=0.75) | Haiku | Sonnet | 58.38 | 84.25 | Paper-matched config, two-phase arch, 20 nodes/72 stmts |
 
 ## Known Issues
 

@@ -1181,6 +1181,22 @@ Empirical analysis of Kasumi CDT built with Claude Haiku, Qwen3-0.6B embeddings,
 4. **Imbalanced relationships**: Arisa interaction has only 6 statements despite being the richest dynamic in source material.
 5. **Config mismatch with paper**: θ_accept=0.80 (paper: 0.75), Qwen3-0.6B (paper: 8B) — produces different tree shape.
 
+### Paper-Matched Config Results (2026-03-28)
+
+After implementing two-phase embedding architecture (subprocess isolation for VRAM-safe 8B model loading):
+
+| Config | Embeddings | θ_accept | NLI Score | Nodes | Statements |
+|--------|-----------|----------|-----------|-------|------------|
+| 0.6B, θ=0.80 | Qwen3-0.6B | 0.80 | 43.11 | 85 | 194 |
+| 8B, θ=0.75 (paper-matched) | Qwen3-8B | 0.75 | 58.38 | 20 | 72 |
+| Paper (GPT-4.1 CDT) | Qwen3-8B | 0.75 | 84.25 | ~10 | ~61 |
+
+**Key observations:**
+- 8B embeddings + paper θ boosted score from 43.11 → 58.38 (+35%)
+- Tree is much more compact: 20 nodes / 72 stmts vs 85 nodes / 194 stmts
+- Remaining gap (58.38 vs 84.25) is likely gen model quality (Haiku vs GPT-4.1/Llama)
+- Two-phase architecture eliminates OOM: peak VRAM ~16GB during Phase A, ~5GB during Phase B
+
 ### Planned Fixes
 
 - **D27**: Cross-topic deduplication pass after tree construction (cosine similarity, merge threshold 0.55)
