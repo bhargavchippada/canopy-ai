@@ -61,4 +61,6 @@
 - [x] Sonnet CDT with Sonnet gen+eval — **66.17** (dominant factor confirmed)
 - [x] GPT-4.1 CDT with Sonnet gen+eval — **66.17** (identical to Sonnet CDT! CDT quality matches GPT-4.1)
 - [x] Haiku+Haiku — **50.00** (cheapest baseline, confirms eval model quality ladder)
-- [ ] Investigate RP gen model impact — is Claude generating different action quality than Llama-8B?
+- [x] Llama 8-bit gen + Sonnet eval — **55.99** (8-bit quantization quality loss)
+- [x] Llama fp16 gen + Sonnet eval — **~58.65** (killed at 62%, trending similar to Haiku gen)
+- [ ] CDT quality investigation (clustering, hypothesis quality, NLI validation per step)
