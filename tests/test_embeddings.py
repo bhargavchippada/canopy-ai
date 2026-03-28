@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+import torch
 
 import canopy.embeddings as emb
 from canopy.embeddings import EmbeddingCache
@@ -395,6 +396,29 @@ class TestRunEmbeddingSubprocess:
                 )
         # Can't easily check specific paths, but the finally block should have run
 
+    def test_cleanup_oserror_logged(self) -> None:
+        """OSError during temp file cleanup is logged, not raised."""
+        expected = np.random.randn(1, 4).astype(np.float32)
+
+        def mock_run(cmd, **kwargs):
+            output_idx = cmd.index("--output") + 1
+            np.save(cmd[output_idx], expected)
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        with (
+            patch("canopy.embeddings.subprocess.run", side_effect=mock_run),
+            patch("canopy.embeddings.Path.unlink", side_effect=OSError("Permission denied")),
+        ):
+            # Should not raise despite cleanup failure
+            arr = emb._run_embedding_subprocess(
+                texts=["a"], model_path="/fake", model_type="surface",
+                character="X", device="cpu", bs=8, timeout=60,
+            )
+        np.testing.assert_array_equal(arr, expected)
+
     def test_resolves_model_path(self) -> None:
         """Model path is resolved to absolute before passing to subprocess."""
         expected = np.random.randn(1, 4).astype(np.float32)
@@ -577,3 +601,453 @@ class TestEmbedWorkerParsing:
                 "--input", "/tmp/in.json", "--output", "/tmp/out.npy",
                 "--model_path", "/m", "--model_type", "invalid",
             ])
+
+
+class TestEmbedWorkerMain:
+    """Tests for _embed_worker encode functions and main() entrypoint (no GPU)."""
+
+    def test_encode_surface_batching(self) -> None:
+        """Mock SentenceTransformer, verify batching logic and L2 normalization."""
+        from canopy._embed_worker import encode_surface
+
+        fake_raw = torch.tensor([[1.0, 0.0], [0.0, 2.0], [3.0, 4.0]])
+
+        mock_model = MagicMock()
+        call_count = 0
+
+        def mock_encode(batch: list[str], convert_to_tensor: bool = False) -> torch.Tensor:
+            nonlocal call_count
+            start = call_count * 2
+            end = min(start + 2, len(fake_raw))
+            call_count += 1
+            return fake_raw[start:end]
+
+        mock_model.encode = mock_encode
+
+        mock_st_module = MagicMock()
+        mock_st_module.SentenceTransformer = MagicMock(return_value=mock_model)
+
+        with patch.dict("sys.modules", {"sentence_transformers": mock_st_module}):
+            result = encode_surface(
+                texts=["a", "b", "c"],
+                model_path="/fake/model",
+                device="cpu",
+                batch_size=2,
+            )
+            mock_st_module.SentenceTransformer.assert_called_once_with(
+                "/fake/model",
+                device="cpu",
+                model_kwargs={"torch_dtype": torch.float16},
+            )
+
+        # Should have 3 rows (2 batches: [a,b] and [c])
+        assert result.shape == (3, 2)
+        # Verify L2 normalization: each row should have unit norm
+        norms = np.linalg.norm(result, axis=1)
+        np.testing.assert_allclose(norms, 1.0, atol=1e-5)
+
+    def test_encode_generator_with_character_suffix(self) -> None:
+        """Mock CausalLM + tokenizer, verify suffix appended and normalization."""
+        from canopy._embed_worker import encode_generator
+
+        dim = 4
+        fake_hidden = torch.randn(2, 5, dim)  # batch=2, seq_len=5, hidden_dim=4
+
+        # Track what texts the tokenizer receives
+        captured_texts: list[list[str]] = []
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.padding_side = "left"
+
+        def tokenizer_call(
+            batch: list[str], return_tensors: str = "pt", padding: bool = True,
+        ) -> MagicMock:
+            captured_texts.append(list(batch))
+            result = MagicMock()
+            result.to = MagicMock(return_value=result)
+            return result
+
+        mock_tokenizer.side_effect = tokenizer_call
+
+        outputs = MagicMock()
+        outputs.hidden_states = [torch.randn(2, 5, dim) for _ in range(3)]
+        outputs.hidden_states[-1] = fake_hidden
+
+        mock_model = MagicMock()
+        mock_model.to = MagicMock(return_value=mock_model)
+        mock_model.return_value = outputs
+
+        mock_transformers = MagicMock()
+        mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
+        mock_transformers.AutoModelForCausalLM.from_pretrained.return_value = MagicMock()
+        mock_transformers.AutoModelForCausalLM.from_pretrained.return_value.to.return_value = mock_model
+
+        with patch.dict("sys.modules", {"transformers": mock_transformers}):
+            result = encode_generator(
+                texts=["scene one", "scene two"],
+                model_path="/fake/model",
+                device="cpu",
+                batch_size=8,
+                character="Alice",
+            )
+
+        # Verify suffix was appended
+        assert len(captured_texts) == 1
+        for text in captured_texts[0]:
+            assert text.endswith("\n\nThus, Alice decides to")
+
+        # Verify shape and normalization
+        assert result.shape == (2, dim)
+        norms = np.linalg.norm(result, axis=1)
+        np.testing.assert_allclose(norms, 1.0, atol=1e-5)
+
+    def test_main_surface_writes_npy(self, tmp_path: Path) -> None:
+        """Mock model, write JSON input, call main(), verify .npy output."""
+        from canopy._embed_worker import main
+
+        input_file = tmp_path / "texts.json"
+        output_file = tmp_path / "embeddings.npy"
+        input_file.write_text(json.dumps(["hello", "world"]))
+
+        fake_embeddings = np.random.randn(2, 8).astype(np.float32)
+
+        with patch("canopy._embed_worker.encode_surface", return_value=fake_embeddings) as mock_enc:
+            main([
+                "--input", str(input_file),
+                "--output", str(output_file),
+                "--model_path", "/fake/model",
+                "--model_type", "surface",
+                "--device", "cpu",
+            ])
+            mock_enc.assert_called_once_with(
+                texts=["hello", "world"],
+                model_path="/fake/model",
+                device="cpu",
+                batch_size=8,
+            )
+
+        assert output_file.exists()
+        loaded = np.load(str(output_file))
+        np.testing.assert_array_equal(loaded, fake_embeddings)
+
+    def test_main_generator_writes_npy(self, tmp_path: Path) -> None:
+        """Mock encode_generator, verify .npy output for generator path."""
+        from canopy._embed_worker import main
+
+        input_file = tmp_path / "texts.json"
+        output_file = tmp_path / "embeddings.npy"
+        input_file.write_text(json.dumps(["scene one", "scene two"]))
+
+        fake_embeddings = np.random.randn(2, 8).astype(np.float32)
+
+        with patch("canopy._embed_worker.encode_generator", return_value=fake_embeddings) as mock_enc:
+            main([
+                "--input", str(input_file),
+                "--output", str(output_file),
+                "--model_path", "/fake/model",
+                "--model_type", "generator",
+                "--character", "Kasumi",
+                "--device", "cpu",
+            ])
+            mock_enc.assert_called_once_with(
+                texts=["scene one", "scene two"],
+                model_path="/fake/model",
+                device="cpu",
+                batch_size=8,
+                character="Kasumi",
+            )
+
+        assert output_file.exists()
+        loaded = np.load(str(output_file))
+        np.testing.assert_array_equal(loaded, fake_embeddings)
+
+    def test_main_generator_without_character_exits(self, tmp_path: Path) -> None:
+        """Call main with generator type and no --character, verify sys.exit(1)."""
+        from canopy._embed_worker import main
+
+        input_file = tmp_path / "texts.json"
+        input_file.write_text(json.dumps(["hello"]))
+
+        with pytest.raises(SystemExit) as exc_info:
+            main([
+                "--input", str(input_file),
+                "--output", str(tmp_path / "out.npy"),
+                "--model_path", "/fake/model",
+                "--model_type", "generator",
+                "--device", "cpu",
+            ])
+        assert exc_info.value.code == 1
+
+    def test_main_exception_in_encode_propagates(self, tmp_path: Path) -> None:
+        """When encode raises a non-SystemExit exception, main() propagates it."""
+        from canopy._embed_worker import main
+
+        input_file = tmp_path / "texts.json"
+        input_file.write_text(json.dumps(["hello"]))
+
+        with patch("canopy._embed_worker.encode_surface", side_effect=RuntimeError("GPU OOM")):
+            with pytest.raises(RuntimeError, match="GPU OOM"):
+                main([
+                    "--input", str(input_file),
+                    "--output", str(tmp_path / "out.npy"),
+                    "--model_path", "/fake",
+                    "--model_type", "surface",
+                    "--device", "cpu",
+                ])
+
+    def test_main_invalid_json_exits(self, tmp_path: Path) -> None:
+        """Write non-list JSON (a dict), verify sys.exit(1)."""
+        from canopy._embed_worker import main
+
+        input_file = tmp_path / "texts.json"
+        input_file.write_text(json.dumps({"not": "a list"}))
+
+        with pytest.raises(SystemExit) as exc_info:
+            main([
+                "--input", str(input_file),
+                "--output", str(tmp_path / "out.npy"),
+                "--model_path", "/fake/model",
+                "--model_type", "surface",
+                "--device", "cpu",
+            ])
+        assert exc_info.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# _load_surface_model / _load_generator_model (mocked, no GPU)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadSurfaceModel:
+    """Test _load_surface_model calls SentenceTransformer correctly."""
+
+    def setup_method(self) -> None:
+        self._saved_path = emb._surface_embedder_path
+        self._saved_device = emb._device
+
+    def teardown_method(self) -> None:
+        emb._surface_embedder_path = self._saved_path
+        emb._device = self._saved_device
+
+    def test_calls_sentence_transformer(self) -> None:
+        import torch
+
+        emb._surface_embedder_path = "/models/qwen-surface"
+        emb._device = torch.device("cpu")
+
+        mock_st_class = MagicMock(return_value="fake_model")
+        mock_module = MagicMock()
+        mock_module.SentenceTransformer = mock_st_class
+
+        with patch.dict("sys.modules", {"sentence_transformers": mock_module}):
+            result = emb._load_surface_model()
+
+        mock_st_class.assert_called_once_with(
+            "/models/qwen-surface",
+            device=torch.device("cpu"),
+            model_kwargs={"torch_dtype": torch.float16},
+        )
+        assert result == "fake_model"
+
+    def test_with_none_path(self) -> None:
+        """When _surface_embedder_path is None, SentenceTransformer receives None."""
+        import torch
+
+        emb._surface_embedder_path = None
+        emb._device = torch.device("cpu")
+
+        mock_st_class = MagicMock(return_value="model")
+        mock_module = MagicMock()
+        mock_module.SentenceTransformer = mock_st_class
+
+        with patch.dict("sys.modules", {"sentence_transformers": mock_module}):
+            emb._load_surface_model()
+
+        mock_st_class.assert_called_once_with(
+            None,
+            device=torch.device("cpu"),
+            model_kwargs={"torch_dtype": torch.float16},
+        )
+
+
+class TestLoadGeneratorModel:
+    """Test _load_generator_model calls AutoModelForCausalLM + AutoTokenizer."""
+
+    def setup_method(self) -> None:
+        self._saved_path = emb._generator_embedder_path
+        self._saved_device = emb._device
+
+    def teardown_method(self) -> None:
+        emb._generator_embedder_path = self._saved_path
+        emb._device = self._saved_device
+
+    def test_calls_auto_model_and_tokenizer(self) -> None:
+        import torch
+
+        emb._generator_embedder_path = "/models/qwen-gen"
+        emb._device = torch.device("cpu")
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer_cls = MagicMock(return_value=mock_tokenizer)
+
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+        mock_model_cls = MagicMock(return_value=mock_model)
+
+        mock_transformers = MagicMock()
+        mock_transformers.AutoModelForCausalLM = MagicMock(from_pretrained=mock_model_cls)
+        mock_transformers.AutoTokenizer = MagicMock(from_pretrained=mock_tokenizer_cls)
+
+        with patch.dict("sys.modules", {"transformers": mock_transformers}):
+            result_model, result_tokenizer = emb._load_generator_model()
+
+        mock_tokenizer_cls.assert_called_once_with("/models/qwen-gen")
+        assert mock_tokenizer.padding_side == "left"
+        mock_model_cls.assert_called_once_with(
+            "/models/qwen-gen",
+            torch_dtype=torch.float16,
+        )
+        mock_model.to.assert_called_once_with(torch.device("cpu"))
+        assert result_model is mock_model
+        assert result_tokenizer is mock_tokenizer
+
+
+# ---------------------------------------------------------------------------
+# surface_encode / generative_encode (mocked, no GPU)
+# ---------------------------------------------------------------------------
+
+
+class TestSurfaceEncode:
+    """Test surface_encode normalizes and returns correct shape."""
+
+    def test_normalizes_and_returns_numpy(self) -> None:
+        mock_model = MagicMock()
+        fake_tensor = torch.randn(3, 8)
+        mock_model.encode.return_value = fake_tensor
+
+        result = emb.surface_encode(["a", "b", "c"], mock_model)
+
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (3, 8)
+        norms = np.linalg.norm(result, axis=1)
+        np.testing.assert_allclose(norms, 1.0, atol=1e-5)
+
+    def test_calls_model_encode(self) -> None:
+        mock_model = MagicMock()
+        mock_model.encode.return_value = torch.randn(2, 4)
+
+        emb.surface_encode(["hello", "world"], mock_model)
+
+        mock_model.encode.assert_called_once_with(["hello", "world"], convert_to_tensor=True)
+
+
+class TestGenerativeEncode:
+    """Test generative_encode normalizes and returns correct shape."""
+
+    def setup_method(self) -> None:
+        self._saved_device = emb._device
+
+    def teardown_method(self) -> None:
+        emb._device = self._saved_device
+
+    def test_normalizes_and_returns_numpy(self) -> None:
+        import torch
+
+        emb._device = torch.device("cpu")
+
+        mock_tokenized = MagicMock()
+        mock_tokenized.to.return_value = mock_tokenized
+        mock_tokenizer = MagicMock(return_value=mock_tokenized)
+
+        fake_hidden = torch.randn(2, 5, 6)
+        mock_output = MagicMock()
+        mock_output.hidden_states = [fake_hidden]
+        mock_model = MagicMock(return_value=mock_output)
+
+        result = emb.generative_encode(["text1", "text2"], mock_model, mock_tokenizer)
+
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (2, 6)
+        norms = np.linalg.norm(result, axis=1)
+        np.testing.assert_allclose(norms, 1.0, atol=1e-5)
+
+    def test_calls_tokenizer_and_model(self) -> None:
+        import torch
+
+        emb._device = torch.device("cpu")
+
+        mock_tokenized = MagicMock()
+        mock_tokenized.to.return_value = mock_tokenized
+        mock_tokenizer = MagicMock(return_value=mock_tokenized)
+
+        fake_hidden = torch.randn(1, 3, 4)
+        mock_output = MagicMock()
+        mock_output.hidden_states = [fake_hidden]
+        mock_model = MagicMock(return_value=mock_output)
+
+        emb.generative_encode(["hello"], mock_model, mock_tokenizer)
+
+        mock_tokenizer.assert_called_once_with(["hello"], return_tensors="pt", padding=True)
+        mock_tokenized.to.assert_called_once_with(torch.device("cpu"))
+        mock_model.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# select_cluster_centers legacy path (model-loading path, mocked)
+# ---------------------------------------------------------------------------
+
+
+class TestSelectClusterCentersLegacy:
+    """Test the legacy select_cluster_centers path that loads models sequentially."""
+
+    def setup_method(self) -> None:
+        self._saved_surface = emb._surface_embedder_path
+        self._saved_generator = emb._generator_embedder_path
+        self._saved_device = emb._device
+
+    def teardown_method(self) -> None:
+        emb._surface_embedder_path = self._saved_surface
+        emb._generator_embedder_path = self._saved_generator
+        emb._device = self._saved_device
+
+    def test_legacy_path_loads_and_unloads_models(self) -> None:
+        """Full legacy path: load surface -> encode -> unload -> load gen -> encode -> unload -> cluster."""
+        import torch
+
+        emb._device = torch.device("cpu")
+        emb._surface_embedder_path = "/surface"
+        emb._generator_embedder_path = "/gen"
+
+        n_pairs = 20
+        pairs = [{"action": f"a{i}", "scene": f"s{i}"} for i in range(n_pairs)]
+
+        mock_surface_model = MagicMock()
+        surface_emb = torch.randn(8, 4)
+        mock_surface_model.encode.return_value = surface_emb
+
+        fake_hidden = torch.randn(8, 3, 6)
+        mock_gen_output = MagicMock()
+        mock_gen_output.hidden_states = [fake_hidden]
+        mock_gen_model = MagicMock(return_value=mock_gen_output)
+
+        mock_gen_tokenized = MagicMock()
+        mock_gen_tokenized.to.return_value = mock_gen_tokenized
+        mock_gen_tokenizer = MagicMock(return_value=mock_gen_tokenized)
+
+        mock_select_rep = MagicMock(return_value=[[pairs[0], pairs[1]], [pairs[2], pairs[3]]])
+
+        with (
+            patch("canopy.embeddings._load_surface_model", return_value=mock_surface_model),
+            patch("canopy.embeddings._load_generator_model", return_value=(mock_gen_model, mock_gen_tokenizer)),
+            patch("canopy.embeddings._unload_model") as mock_unload,
+            patch(
+                "canopy.cluster.KMeansCluster.fit_predict",
+                return_value=(np.array([0, 1] * 10), np.random.randn(2, 10)),
+            ),
+            patch("canopy.cluster.select_representative_samples", mock_select_rep),
+        ):
+            result = emb.select_cluster_centers("Alice", pairs, bs=8)
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert mock_unload.call_count == 2

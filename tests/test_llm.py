@@ -682,3 +682,53 @@ class TestBatchGenerate:
         assert result.successes == {"a": "resp_a"}
         assert "b" in result.exhausted_ids
         assert "c" in result.exhausted_ids
+
+    def test_exception_exhausts_all_items(self) -> None:
+        """When generate_many raises every round, all items end up exhausted."""
+        adapter = MagicMock()
+        adapter.generate_many = MagicMock(
+            side_effect=[
+                RuntimeError("fail round 1"),
+                RuntimeError("fail round 2"),
+                RuntimeError("fail round 3"),
+            ]
+        )
+        result = batch_generate(
+            [("a", "pa"), ("b", "pb")],
+            adapter=adapter,
+            max_attempts=3,
+        )
+        assert result.successes == {}
+        assert result.exhausted_ids == frozenset({"a", "b"})
+        assert result.all_succeeded is False
+
+    def test_exception_exhausts_then_breaks(self) -> None:
+        """When exception exhausts all pending items, loop breaks immediately."""
+        adapter = MagicMock()
+        adapter.generate_many = MagicMock(
+            side_effect=RuntimeError("always fails"),
+        )
+        result = batch_generate(
+            [("x", "px")],
+            adapter=adapter,
+            max_attempts=1,
+        )
+        assert result.successes == {}
+        assert "x" in result.exhausted_ids
+        # generate_many should only be called once since max_attempts=1
+        adapter.generate_many.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _session_generate guard
+# ---------------------------------------------------------------------------
+
+
+class TestSessionGenerateGuard:
+    def test_session_generate_without_reuse_raises(self) -> None:
+        """When reuse_session=False, _session_generate raises RuntimeError."""
+        adapter = ClaudeCodeAdapter(
+            default_model="m", timeout=5.0, max_retries=0, reuse_session=False,
+        )
+        with pytest.raises(RuntimeError, match="reuse_session=True"):
+            asyncio.run(adapter._session_generate("prompt", "m"))

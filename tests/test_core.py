@@ -508,3 +508,23 @@ class TestCDTNodeCacheForwarding:
         )
         # Custom embedder was called, not the cache path
         assert "custom_embedder" in calls
+
+    def test_no_embedder_no_cache_calls_select_cluster_centers(self) -> None:
+        """When no _embedder and no _embedding_cache, the legacy select_cluster_centers is called."""
+        pairs = [{"action": f"action_{i}", "scene": f"scene_{i}"} for i in range(20)]
+
+        with patch("canopy.embeddings.select_cluster_centers", side_effect=_mock_cluster_fn) as mock_scc:
+            CDTNode(
+                "Alice",
+                "identity",
+                pairs,
+                config=CDTConfig(max_depth=1),
+                _validator=_mock_validate_accept,
+                _hypothesis_fn=_mock_hypothesize,
+                _summarize_fn=_mock_summarize,
+            )
+
+        mock_scc.assert_called_once()
+        call_kwargs = mock_scc.call_args
+        # embedding_cache should be None (no cache provided)
+        assert call_kwargs.kwargs.get("embedding_cache") is None

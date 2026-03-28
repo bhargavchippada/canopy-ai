@@ -170,7 +170,7 @@ def main(argv: list[str] | None = None) -> None:
             batch_size=args.batch_size,
             character=args.character,
         )
-    else:
+    else:  # pragma: no cover — argparse choices prevents this
         log.error("Unknown model_type: %s", args.model_type)
         sys.exit(1)
 
@@ -179,7 +179,7 @@ def main(argv: list[str] | None = None) -> None:
     log.info("Done")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover — script entry point
     try:
         main()
     except Exception:
