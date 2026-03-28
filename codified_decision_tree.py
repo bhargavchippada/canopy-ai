@@ -113,6 +113,8 @@ def main() -> None:
     log.info("Phase A complete: surface=%s, generator=%s", cache.surface.shape, cache.generator.shape)
 
     # Stamp _embed_idx on copies (never mutate caller's dicts)
+    if any("_embed_idx" in p for p in pairs):
+        log.warning("pairs already contain '_embed_idx' — overwriting with sequential indices")
     indexed_pairs = [{**pair, "_embed_idx": idx} for idx, pair in enumerate(pairs)]
 
     config = CDTConfig(

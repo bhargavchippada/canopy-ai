@@ -171,8 +171,8 @@ def _run_embedding_subprocess(
         for path in (input_path, output_path):
             try:
                 Path(path).unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as e:
+                log.warning("Failed to clean up temp file %s: %s", path, e)
 
 
 # Module-level model paths — set by init_models(), loaded on demand
@@ -285,9 +285,12 @@ def select_cluster_centers(
                 "Stamp pairs with _embed_idx before passing embedding_cache."
             )
         indices = [p["_embed_idx"] for p in pairs]
-        # Bounds check: ensure all indices are valid for the cache
+        # Type + bounds check: ensure all indices are valid ints for the cache
         cache_size = len(embedding_cache.surface)
-        bad = [(i, idx) for i, idx in enumerate(indices) if not (0 <= idx < cache_size)]
+        bad = [
+            (i, idx) for i, idx in enumerate(indices)
+            if not isinstance(idx, int) or not (0 <= idx < cache_size)
+        ]
         if bad:
             raise RuntimeError(
                 f"{len(bad)} pairs have out-of-range _embed_idx (cache size={cache_size}): "
