@@ -179,7 +179,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--cdt_path",
         type=str,
         default=None,
-        help="Path to CDT package pkl. Auto-detected if not specified.",
+        help="Path to CDT package pkl. Required when method is 'cdt_package'.",
     )
 
     return parser
@@ -335,7 +335,7 @@ def benchmark(
         device_id: CUDA device ID.
         max_parallel: Max concurrent evaluate() calls (default 6).
         return_list: If True, return list of scores instead of mean.
-        cdt_path: Explicit path to CDT package pkl. Auto-detected if None.
+        cdt_path: Path to CDT package pkl. Required when method is 'cdt_package'.
 
     Returns:
         Mean NLI score (float) or list of individual scores.
@@ -347,29 +347,17 @@ def benchmark(
 
     # Load character metadata and AR pairs
     _, character2artifact, band2members = load_character_metadata()
-
-    if method == "cdt_package" and character not in character2artifact:
-        raise ValueError(f"Unknown character '{character}'. Available: {sorted(character2artifact.keys())}")
-
     test_pairs = load_ar_pairs(character, character2artifact, band2members)["test"]
 
     # Load CDT package once (hoisted out of evaluate)
     cdts: dict[str, Any] = {}
     pkg_path: str | None = None
     if method == "cdt_package":
-        if cdt_path is not None:
-            pkg_path = cdt_path
-        else:
-            model_short = _model_short_name(engine)
-            pkg_path = f"packages/{character}.{model_short}.depth3.relation.pkl"
-            if not os.path.exists(pkg_path):
-                # Fall back to legacy naming
-                legacy_path = f"packages/{character}.cdt.v3.1.package.relation.pkl"
-                if os.path.exists(legacy_path):
-                    log.info("Using legacy CDT path: %s", legacy_path)
-                    pkg_path = legacy_path
-                else:
-                    raise FileNotFoundError(f"No CDT package found at {pkg_path} or {legacy_path}")
+        if cdt_path is None:
+            raise ValueError(
+                "--cdt_path is required when method is 'cdt_package'. Specify the path to the CDT package pkl file."
+            )
+        pkg_path = cdt_path
         cdts = load_cdt_package(pkg_path)
         _validate_cdt_package(cdts, character)
         log.info("Loaded CDT package from %s", pkg_path)
@@ -436,17 +424,20 @@ def benchmark(
     final_score = float(np.mean(scores))
 
     # Save benchmark results with provenance
-    _save_benchmark_results(
-        character=character,
-        method=method,
-        engine=engine,
-        eval_engine=eval_engine,
-        cdt_path=pkg_path if method == "cdt_package" else None,
-        cdt_metadata=cdts.get("metadata") if cdts else None,
-        score=final_score,
-        per_pair_results=results,
-        has_relationships=bool(cdts.get("rel_topic2cdt")) if cdts else False,
-    )
+    try:
+        _save_benchmark_results(
+            character=character,
+            method=method,
+            engine=engine,
+            eval_engine=eval_engine,
+            cdt_path=pkg_path if method == "cdt_package" else None,
+            cdt_metadata=cdts.get("metadata") if cdts else None,
+            score=final_score,
+            per_pair_results=results,
+            has_relationships=bool(cdts.get("rel_topic2cdt")) if cdts else False,
+        )
+    except OSError as exc:
+        log.error("Failed to save benchmark results: %s", exc)
 
     if return_list:
         return scores

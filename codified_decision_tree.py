@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import logging
+import os
 import pickle
 
 import torch
@@ -17,6 +19,8 @@ from canopy.data import load_ar_pairs, load_character_metadata
 from canopy.embeddings import init_models as init_embedding_models
 from canopy.llm import ClaudeCodeAdapter, set_adapter
 from canopy.validation import init_models as init_validation_models
+
+log = logging.getLogger(__name__)
 
 MODEL_SHORT_NAMES: dict[str, str] = {
     "claude-haiku-4-5": "haiku",
@@ -36,19 +40,12 @@ NLI_SHORT_NAMES: dict[str, str] = {
     "deberta-v3-base-rp-nli": "deberta",
 }
 
-CLUSTER_SHORT_NAMES: dict[str, str] = {
-    "kmeans": "kmeans",
-    "hdbscan": "hdbscan",
-}
-
 
 def _short_name(name: str, table: dict[str, str]) -> str:
     """Resolve a model path/ID to a short filename-safe name."""
     # Check full path first, then basename
     if name in table:
         return table[name]
-    import os
-
     base = os.path.basename(os.path.expanduser(name))
     if base in table:
         return table[base]
@@ -78,6 +75,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = build_arg_parser().parse_args()
     device = torch.device(f"cuda:{args.device_id}")
 
@@ -85,9 +83,9 @@ def main() -> None:
     set_adapter(ClaudeCodeAdapter(default_model=args.engine))
 
     # Load models
-    print("Loading embedding models...")
+    log.info("Loading embedding models...")
     init_embedding_models(args.surface_embedder_path, args.generator_embedder_path, device)
-    print("Loading validation model...")
+    log.info("Loading validation model...")
     init_validation_models(args.discriminator_path, device)
 
     # Load data
@@ -149,17 +147,18 @@ def main() -> None:
         "relationship_topics": len(rel_topic2cdt),
     }
 
+    os.makedirs("packages", exist_ok=True)
     with open(output_path, "wb") as f:
         pickle.dump(
             {"topic2cdt": topic2cdt, "rel_topic2cdt": rel_topic2cdt, "metadata": metadata},
             f,
         )
 
-    print(f"\nSaved to {output_path}")
-    print(f"  Attribute topics: {len(topic2cdt)}")
-    print(f"  Relationship topics: {len(rel_topic2cdt)}")
-    print(f"  Total nodes: {total_nodes}")
-    print(f"  Total statements: {total_stmts}")
+    log.info("Saved to %s", output_path)
+    log.info("  Attribute topics: %d", len(topic2cdt))
+    log.info("  Relationship topics: %d", len(rel_topic2cdt))
+    log.info("  Total nodes: %d", total_nodes)
+    log.info("  Total statements: %d", total_stmts)
 
 
 if __name__ == "__main__":
