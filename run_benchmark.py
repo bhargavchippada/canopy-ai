@@ -7,9 +7,12 @@ and scores them against ground truth using NLI (DeBERTa) and LLM evaluation.
 from __future__ import annotations
 
 import argparse
+import datetime
+import json
 import logging
 import os
 import pickle
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import numpy as np
@@ -18,7 +21,7 @@ from tqdm.auto import tqdm
 
 from canopy.core import CDTNode
 from canopy.data import load_ar_pairs, load_character_metadata
-from canopy.llm import EVAL_MODEL, HYPOTHESIS_MODEL, extract_json, generate
+from canopy.llm import HYPOTHESIS_MODEL, extract_json, generate
 from canopy.validation import init_models as init_validation_models
 
 log = logging.getLogger(__name__)
@@ -55,6 +58,91 @@ def load_cdt_package(path: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+_GEN_SHORT: dict[str, str] = {
+    "claude-haiku-4-5": "haiku",
+    "claude-sonnet-4-6": "sonnet",
+    "gpt-4.1": "gpt41",
+}
+
+
+def _model_short_name(engine: str) -> str:
+    """Convert model ID to short name for filenames."""
+    return _GEN_SHORT.get(engine, engine.replace(".", "-"))
+
+
+def _validate_cdt_package(cdts: dict[str, Any], character: str) -> None:
+    """Validate CDT package structure before benchmarking."""
+    if "topic2cdt" not in cdts:
+        raise ValueError(f"CDT package missing 'topic2cdt' key. Keys found: {list(cdts.keys())}")
+    if "rel_topic2cdt" not in cdts:
+        raise ValueError(f"CDT package missing 'rel_topic2cdt' key. Keys found: {list(cdts.keys())}")
+
+    topic2cdt = cdts["topic2cdt"]
+    rel_topic2cdt = cdts["rel_topic2cdt"]
+
+    if not topic2cdt:
+        raise ValueError("CDT package has empty topic2cdt — no attribute CDTs found")
+
+    # Print structure summary
+    metadata = cdts.get("metadata", {})
+    log.info("CDT package summary:")
+    log.info("  Attribute topics: %d", len(topic2cdt))
+    log.info("  Relationship topics: %d", len(rel_topic2cdt))
+    if metadata:
+        log.info("  Gen model: %s", metadata.get("gen_model", metadata.get("built_by", "unknown")))
+        log.info("  Embed model: %s", metadata.get("embed_model", "unknown"))
+        log.info("  NLI model: %s", metadata.get("nli_model", "unknown"))
+        log.info("  Depth: %s", metadata.get("max_depth", metadata.get("depth", "unknown")))
+        log.info("  Built at: %s", metadata.get("built_at", "unknown"))
+        log.info("  Total nodes: %s", metadata.get("total_nodes", "unknown"))
+        log.info("  Total statements: %s", metadata.get("total_statements", "unknown"))
+
+
+def _save_benchmark_results(
+    *,
+    character: str,
+    method: str,
+    engine: str,
+    eval_engine: str,
+    cdt_path: str | None,
+    cdt_metadata: dict[str, Any] | None,
+    score: float,
+    per_pair_results: list[int | None],
+    has_relationships: bool,
+) -> None:
+    """Save benchmark results as JSON with full provenance."""
+    os.makedirs("results", exist_ok=True)
+
+    gen_short = _model_short_name(engine)
+    eval_short = _model_short_name(eval_engine)
+    cdt_tag = os.path.basename(cdt_path).replace(".pkl", "") if cdt_path else "none"
+    result_path = f"results/{character}.{cdt_tag}.{gen_short}+{eval_short}.json"
+
+    result_data = {
+        "character": character,
+        "method": method,
+        "score": round(score, 2),
+        "n_pairs": len(per_pair_results),
+        "n_succeeded": sum(1 for s in per_pair_results if s is not None),
+        "n_failed": sum(1 for s in per_pair_results if s is None),
+        "gen_model": engine,
+        "eval_model": eval_engine,
+        "cdt_package_used": cdt_path,
+        "cdt_metadata": cdt_metadata,
+        "traversal_config": {
+            "mode": "gated",
+            "relationships_included": has_relationships,
+        },
+        "per_pair_scores": per_pair_results,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
+    with open(result_path, "w", encoding="utf-8") as f:
+        json.dump(result_data, f, indent=2, default=str)
+
+    log.info("Results saved to %s", result_path)
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run CDT-based RP generation benchmark with Claude")
 
@@ -70,8 +158,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--eval_engine",
         type=str,
-        default=EVAL_MODEL,
-        help="Model for eval scoring (default: claude-sonnet-4-6)",
+        default=HYPOTHESIS_MODEL,
+        help="Model for eval scoring (default: claude-haiku-4-5, same as gen for consistency)",
+    )
+
+    parser.add_argument(
+        "--max_parallel",
+        type=int,
+        default=6,
+        help="Max concurrent evaluate() calls (default: 6)",
     )
 
     parser.add_argument(
@@ -80,6 +175,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="~/models/deberta-v3-base-rp-nli",
     )
     parser.add_argument("--device_id", type=int, default=0)
+    parser.add_argument(
+        "--cdt_path",
+        type=str,
+        default=None,
+        help="Path to CDT package pkl. Auto-detected if not specified.",
+    )
 
     return parser
 
@@ -96,7 +197,7 @@ def evaluate(
     cdts: dict[str, Any],
     *,
     engine: str = HYPOTHESIS_MODEL,
-    eval_engine: str = EVAL_MODEL,
+    eval_engine: str = HYPOTHESIS_MODEL,
 ) -> int:
     """Evaluate a single scene-action pair.
 
@@ -216,10 +317,12 @@ def benchmark(
     method: str,
     *,
     engine: str = HYPOTHESIS_MODEL,
-    eval_engine: str = EVAL_MODEL,
+    eval_engine: str = HYPOTHESIS_MODEL,
     discriminator_path: str = "~/models/deberta-v3-base-rp-nli",
     device_id: int = 0,
+    max_parallel: int = 6,
     return_list: bool = False,
+    cdt_path: str | None = None,
 ) -> list[int] | float:
     """Run the full benchmark for a character.
 
@@ -230,7 +333,9 @@ def benchmark(
         eval_engine: Model for eval scoring.
         discriminator_path: Path to DeBERTa NLI model.
         device_id: CUDA device ID.
+        max_parallel: Max concurrent evaluate() calls (default 6).
         return_list: If True, return list of scores instead of mean.
+        cdt_path: Explicit path to CDT package pkl. Auto-detected if None.
 
     Returns:
         Mean NLI score (float) or list of individual scores.
@@ -250,23 +355,46 @@ def benchmark(
 
     # Load CDT package once (hoisted out of evaluate)
     cdts: dict[str, Any] = {}
+    pkg_path: str | None = None
     if method == "cdt_package":
-        pkg_path = f"packages/{character}.cdt.v3.1.package.relation.pkl"
+        if cdt_path is not None:
+            pkg_path = cdt_path
+        else:
+            model_short = _model_short_name(engine)
+            pkg_path = f"packages/{character}.{model_short}.depth3.relation.pkl"
+            if not os.path.exists(pkg_path):
+                # Fall back to legacy naming
+                legacy_path = f"packages/{character}.cdt.v3.1.package.relation.pkl"
+                if os.path.exists(legacy_path):
+                    log.info("Using legacy CDT path: %s", legacy_path)
+                    pkg_path = legacy_path
+                else:
+                    raise FileNotFoundError(f"No CDT package found at {pkg_path} or {legacy_path}")
         cdts = load_cdt_package(pkg_path)
+        _validate_cdt_package(cdts, character)
         log.info("Loaded CDT package from %s", pkg_path)
 
-    scores: list[int] = []
-    bar = tqdm(test_pairs)
+    # Build evaluation items upfront
+    items: list[dict[str, Any]] = []
+    for d in test_pairs:
+        items.append(
+            {
+                "condition": d["scene"],
+                "question": f"What'll be {character}'s next action in response to the current scene?",
+                "action": d["action"],
+                "last_character": d["last_character"],
+            }
+        )
 
-    for d in bar:
-        item = {
-            "condition": d["scene"],
-            "question": f"What'll be {character}'s next action in response to the current scene?",
-            "action": d["action"],
-            "last_character": d["last_character"],
-        }
-        try:
-            score = evaluate(
+    total = len(items)
+    results: list[int | None] = [None] * total
+    bar = tqdm(total=total, desc="Score=N/A")
+
+    with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+        futures = {}
+        for i, item in enumerate(items):
+            future = executor.submit(
+                evaluate,
                 character,
                 item,
                 method,
@@ -274,22 +402,55 @@ def benchmark(
                 engine=engine,
                 eval_engine=eval_engine,
             )
-        except Exception as exc:
-            log.error("evaluate() failed for pair #%d, skipping: %s", len(scores) + 1, exc)
-            continue
+            futures[future] = i
 
-        scores.append(score)
-        mean_score = float(np.mean(scores))
-        log.info("#%d # NLI Score: %.2f", len(scores), mean_score)
-        bar.set_description(f"Score={mean_score:.4f}")
+        completed = 0
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                results[idx] = future.result()
+            except Exception as exc:
+                log.error("evaluate() failed for pair #%d, skipping: %s", idx + 1, exc)
+
+            completed += 1
+            bar.update(1)
+            valid_scores = [s for s in results if s is not None]
+            if valid_scores:
+                mean_score = float(np.mean(valid_scores))
+                log.info(
+                    "#%d/%d NLI Score: %.2f",
+                    len(valid_scores),
+                    total,
+                    mean_score,
+                )
+                bar.set_description(f"Score={mean_score:.4f}")
+
+    bar.close()
+
+    scores = [s for s in results if s is not None]
 
     if not scores:
         log.warning("No test pairs evaluated for %s with method %s", character, method)
         return [] if return_list else 0.0
 
+    final_score = float(np.mean(scores))
+
+    # Save benchmark results with provenance
+    _save_benchmark_results(
+        character=character,
+        method=method,
+        engine=engine,
+        eval_engine=eval_engine,
+        cdt_path=pkg_path if method == "cdt_package" else None,
+        cdt_metadata=cdts.get("metadata") if cdts else None,
+        score=final_score,
+        per_pair_results=results,
+        has_relationships=bool(cdts.get("rel_topic2cdt")) if cdts else False,
+    )
+
     if return_list:
         return scores
-    return float(np.mean(scores))
+    return final_score
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +472,8 @@ def main() -> None:
         eval_engine=args.eval_engine,
         discriminator_path=args.discriminator_path,
         device_id=args.device_id,
+        max_parallel=args.max_parallel,
+        cdt_path=args.cdt_path,
     )
     log.info("Final NLI Score: %.2f", result)
 

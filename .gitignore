@@ -47,3 +47,6 @@ packages/*.pickle
 data/
 storylines/
 profiles/*.txt
+
+# Benchmark results (generated)
+results/
