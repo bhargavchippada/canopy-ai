@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import logging
+import re
 from typing import Any
 
 from canopy.llm import batch_generate, extract_json, generate
@@ -52,20 +54,57 @@ To do this, please propose hypotheses for the general behavior logic of {charact
 - Focus on the **next action** when asking! Don't ask whether certain event is involved, instead ask whether the scene might trigger potential behavior for {character}'s **next action**.
 - Directly include "{character}'s next action" in the question!
 
-4. Output the hypothesized scene-action triggers in the following JSON format:
-```json
-{{
-  "action_hypotheses": [],
-  "scene_check_hypotheses": []
-}}
+4. Output the hypothesized scene-action triggers in the following Python code block format:
+```python
+action_hypotheses = [] # A list of syntactically complete statements (always mentioning {character})
+scene_check_hypotheses = [] # A list of syntactically complete questions to check the given scene (always mentioning {character})
 ```
-Where action_hypotheses is a list of syntactically complete statements (always mentioning {character})
-and scene_check_hypotheses is a list of syntactically complete questions to check the given scene (always mentioning {character}).
 """
 
 
+def _extract_python_list(code: str, var_name: str) -> list[str]:
+    """Extract a list assignment from Python code using ast.literal_eval.
+
+    Finds `var_name = [...]` and safely parses the list literal.
+    Never uses exec/eval.
+    """
+    # Match var_name = [...] allowing multiline lists
+    pattern = rf"^{re.escape(var_name)}\s*=\s*(\[.*?\])"
+    match = re.search(pattern, code, re.MULTILINE | re.DOTALL)
+    if not match:
+        raise ValueError(f"Could not find '{var_name} = [...]' in code block")
+    try:
+        result = ast.literal_eval(match.group(1))
+    except (SyntaxError, ValueError) as exc:
+        raise ValueError(f"Failed to parse '{var_name}' list: {exc}") from exc
+    if not isinstance(result, list):
+        raise ValueError(f"'{var_name}' is not a list")
+    return [str(item) for item in result]
+
+
+def _extract_python_block(response: str) -> str | None:
+    """Extract code between ```python and ``` markers."""
+    match = re.search(r"```python\s*\n(.*?)```", response, re.DOTALL)
+    return match.group(1) if match else None
+
+
 def parse_hypothesis_response(response: str) -> tuple[list[str], list[str]]:
-    """Parse a hypothesis LLM response into (action_hypotheses, scene_check_hypotheses)."""
+    """Parse a hypothesis LLM response into (action_hypotheses, scene_check_hypotheses).
+
+    Tries Python code block format first (paper format), falls back to JSON.
+    """
+    # Try Python code block format first
+    code = _extract_python_block(response)
+    if code is not None:
+        try:
+            action_hyps = _extract_python_list(code, "action_hypotheses")
+            scene_hyps = _extract_python_list(code, "scene_check_hypotheses")
+            min_len = min(len(action_hyps), len(scene_hyps))
+            return action_hyps[:min_len], scene_hyps[:min_len]
+        except ValueError:
+            log.debug("Python code block parsing failed, trying JSON fallback")
+
+    # Fallback to JSON format
     parsed = extract_json(response)
     action_hyps = parsed.get("action_hypotheses", [])
     scene_hyps = parsed.get("scene_check_hypotheses", [])

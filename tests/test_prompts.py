@@ -9,7 +9,61 @@ from unittest.mock import patch
 import pytest
 
 from canopy.llm import BatchResult
-from canopy.prompts import make_hypotheses_batch, parse_hypothesis_response, summarize_triggers
+from canopy.prompts import (
+    _extract_python_block,
+    _extract_python_list,
+    make_hypotheses_batch,
+    parse_hypothesis_response,
+    summarize_triggers,
+)
+
+# ---------------------------------------------------------------------------
+# _extract_python_block / _extract_python_list
+# ---------------------------------------------------------------------------
+
+
+class TestExtractPythonBlock:
+    def test_extracts_code(self) -> None:
+        response = 'Some text\n```python\nx = 1\n```\nMore text'
+        assert _extract_python_block(response) == "x = 1\n"
+
+    def test_returns_none_when_missing(self) -> None:
+        assert _extract_python_block("no code block here") is None
+
+    def test_ignores_non_python_blocks(self) -> None:
+        response = '```json\n{"key": "val"}\n```'
+        assert _extract_python_block(response) is None
+
+
+class TestExtractPythonList:
+    def test_simple_list(self) -> None:
+        code = 'action_hypotheses = ["stmt1", "stmt2"]'
+        result = _extract_python_list(code, "action_hypotheses")
+        assert result == ["stmt1", "stmt2"]
+
+    def test_multiline_list(self) -> None:
+        code = 'action_hypotheses = [\n    "stmt1",\n    "stmt2",\n]'
+        result = _extract_python_list(code, "action_hypotheses")
+        assert result == ["stmt1", "stmt2"]
+
+    def test_missing_var_raises(self) -> None:
+        with pytest.raises(ValueError, match="Could not find"):
+            _extract_python_list("x = 1", "action_hypotheses")
+
+    def test_invalid_syntax_raises(self) -> None:
+        with pytest.raises(ValueError, match="Failed to parse"):
+            _extract_python_list("action_hypotheses = [1 + ]", "action_hypotheses")
+
+    def test_non_list_raises(self) -> None:
+        """A string value wrapped in brackets to fool the regex but not ast."""
+        with pytest.raises(ValueError, match="Could not find"):
+            _extract_python_list('action_hypotheses = "not a list"', "action_hypotheses")
+
+    def test_with_comment(self) -> None:
+        code = 'action_hypotheses = ["s1"] # A list of statements'
+        result = _extract_python_list(code, "action_hypotheses")
+        assert result == ["s1"]
+
 
 # ---------------------------------------------------------------------------
 # parse_hypothesis_response
@@ -17,7 +71,29 @@ from canopy.prompts import make_hypotheses_batch, parse_hypothesis_response, sum
 
 
 class TestParseHypothesisResponse:
-    def test_valid_response(self) -> None:
+    def test_python_code_block(self) -> None:
+        response = (
+            'Some reasoning\n```python\n'
+            'action_hypotheses = ["stmt1", "stmt2"]\n'
+            'scene_check_hypotheses = ["q1", "q2"]\n'
+            '```'
+        )
+        actions, scenes = parse_hypothesis_response(response)
+        assert actions == ["stmt1", "stmt2"]
+        assert scenes == ["q1", "q2"]
+
+    def test_python_code_block_with_comments(self) -> None:
+        response = (
+            '```python\n'
+            'action_hypotheses = ["stmt1"] # A list of statements\n'
+            'scene_check_hypotheses = ["q1"] # A list of questions\n'
+            '```'
+        )
+        actions, scenes = parse_hypothesis_response(response)
+        assert actions == ["stmt1"]
+        assert scenes == ["q1"]
+
+    def test_json_fallback(self) -> None:
         response = '{"action_hypotheses": ["stmt1", "stmt2"], "scene_check_hypotheses": ["q1", "q2"]}'
         actions, scenes = parse_hypothesis_response(response)
         assert actions == ["stmt1", "stmt2"]
@@ -29,9 +105,29 @@ class TestParseHypothesisResponse:
         assert len(actions) == 1
         assert len(scenes) == 1
 
-    def test_no_json_raises(self) -> None:
+    def test_python_block_mismatched_truncates(self) -> None:
+        response = (
+            '```python\n'
+            'action_hypotheses = ["a1", "a2", "a3"]\n'
+            'scene_check_hypotheses = ["s1"]\n'
+            '```'
+        )
+        actions, scenes = parse_hypothesis_response(response)
+        assert len(actions) == 1
+        assert len(scenes) == 1
+
+    def test_no_json_or_python_raises(self) -> None:
         with pytest.raises(ValueError, match="No valid JSON"):
             parse_hypothesis_response("plain text with no json")
+
+    def test_malformed_python_falls_back_to_json(self) -> None:
+        response = (
+            '```python\naction_hypotheses = [broken\n```\n'
+            '{"action_hypotheses": ["fallback"], "scene_check_hypotheses": ["q"]}'
+        )
+        actions, scenes = parse_hypothesis_response(response)
+        assert actions == ["fallback"]
+        assert scenes == ["q"]
 
 
 # ---------------------------------------------------------------------------
