@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from canopy.llm import extract_json, generate, generate_many
+
+log = logging.getLogger(__name__)
 
 
 def make_hypothesis_prompt(
@@ -91,7 +95,7 @@ def make_hypotheses_batch(
             statement_candidates.extend(action_hyps)
             gates.extend(scene_hyps)
         except (ValueError, KeyError) as exc:
-            print(f"  Warning: cluster {i} hypothesis parsing failed: {exc}")
+            log.warning("Cluster %d hypothesis parsing failed: %s", i, exc)
             continue
     return statement_candidates, gates
 
@@ -143,9 +147,13 @@ Return exactly 8 pairs:
 * Each scene_check_hypothesis clearly tests for {character}'s next action.
 * Each action_hypothesis is general, grounded, and non-assertive.
 """
-        response = generate(boost_prompt, model=model)
-        parsed = extract_json(response)
-        paired_hypotheses = parsed["top8_pairs"]
+        try:
+            response = generate(boost_prompt, model=model)
+            parsed = extract_json(response)
+            paired_hypotheses = parsed["top8_pairs"]
+        except (ValueError, KeyError) as exc:
+            log.warning("Summarize compression failed, using first 8: %s", exc)
+            paired_hypotheses = paired_hypotheses[:8]
 
     return (
         [pair["scene_check_hypothesis"] for pair in paired_hypotheses],
