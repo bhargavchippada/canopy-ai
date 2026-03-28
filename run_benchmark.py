@@ -200,6 +200,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=False,
         help="Skip relationship CDTs during traversal (attribute topics only).",
     )
+    parser.add_argument(
+        "--multi-eval",
+        action="store_true",
+        default=False,
+        help="Run eval with both Haiku and Sonnet, output ensemble scores.",
+    )
 
     return parser
 
@@ -308,6 +314,89 @@ Output in json:
     return score
 
 
+def evaluate_multi(
+    character: str,
+    d: dict[str, Any],
+    method: str,
+    cdts: dict[str, Any],
+    *,
+    engine: str = HYPOTHESIS_MODEL,
+    eval_engines: list[str] | None = None,
+    include_relationships: bool = True,
+) -> dict[str, Any]:
+    """Evaluate with multiple eval models, returning per-model and ensemble scores.
+
+    Returns dict with keys: prediction, per_model (dict of model->score),
+    ensemble_mean, ensemble_min, ensemble_max.
+    """
+    if eval_engines is None:
+        eval_engines = [EVAL_MODEL]
+
+    scene = d["condition"]
+    question = d["question"]
+    action = d["action"]
+    last_character = d["last_character"]
+
+    prompt = f"""# Scene
+{scene}
+
+# Question
+{question} Answer a concise narration in one sentence."""
+
+    if method == "cdt_package":
+        grounding = _build_cdt_grounding(
+            character, scene, last_character, cdts,
+            include_relationships=include_relationships,
+        )
+    else:
+        grounding = None
+
+    if grounding is not None:
+        prompt = f"# Background Knowledge\n{grounding}\n\n{prompt}"
+
+    # Generate prediction ONCE
+    prediction = generate(prompt, model=engine)
+
+    score_instruction = f"""# Scene
+{scene}
+
+Your Response: {prediction}
+Ground Truth: {action}
+
+Score the action of {character} in the response based on the ground truth.
+A: The ground truth entails the action of {character} in the response. (Following the same character logic.)
+B: The ground truth is neutral to the action of {character} in the response. (Reflecting a different facet.)
+C: The ground truth contradicts the action of {character} in the response. (Following a contradicted character logic.)
+
+Output in json:
+```json
+{{
+"reasoning": "...",
+"score": "A/B/C"
+}}
+```"""
+
+    # Eval with each model
+    per_model: dict[str, int] = {}
+    for eval_model in eval_engines:
+        resp = generate(score_instruction, model=eval_model)
+        try:
+            parsed = extract_json(resp)
+            letter = str(parsed.get("score", "B")).strip().upper()
+        except ValueError:
+            letter = "B"
+        per_model[eval_model] = SCORE_MAP.get(letter, 50)
+
+    scores = list(per_model.values())
+    return {
+        "prediction": prediction,
+        "per_model": per_model,
+        "ensemble_mean": sum(scores) / len(scores),
+        "ensemble_min": min(scores),
+        "ensemble_max": max(scores),
+    }
+
+
 def _build_cdt_grounding(
     character: str,
     scene: str,
@@ -355,6 +444,7 @@ def benchmark(
     return_list: bool = False,
     cdt_path: str | None = None,
     include_relationships: bool = True,
+    multi_eval: bool = False,
 ) -> list[int] | float:
     """Run the full benchmark for a character.
 
@@ -407,54 +497,89 @@ def benchmark(
         )
 
     total = len(items)
-    results: list[int | None] = [None] * total
     bar = tqdm(total=total, desc="Score=N/A")
 
-    with ThreadPoolExecutor(max_workers=max_parallel) as executor:
-        futures = {}
-        for i, item in enumerate(items):
-            future = executor.submit(
-                evaluate,
-                character,
-                item,
-                method,
-                cdts,
-                engine=engine,
-                eval_engine=eval_engine,
-                include_relationships=include_relationships,
-            )
-            futures[future] = i
+    if multi_eval:
+        eval_engines = [HYPOTHESIS_MODEL, EVAL_MODEL]
+        log.info("Multi-eval mode: evaluating with %s", eval_engines)
+        multi_results: list[dict[str, Any] | None] = [None] * total
 
-        completed = 0
-        for future in as_completed(futures):
-            idx = futures[future]
-            try:
-                results[idx] = future.result()
-            except Exception as exc:
-                log.error("evaluate() failed for pair #%d, skipping: %s", idx + 1, exc)
-
-            completed += 1
-            bar.update(1)
-            valid_scores = [s for s in results if s is not None]
-            if valid_scores:
-                mean_score = float(np.mean(valid_scores))
-                log.info(
-                    "#%d/%d NLI Score: %.2f",
-                    len(valid_scores),
-                    total,
-                    mean_score,
+        with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+            futures = {}
+            for i, item in enumerate(items):
+                future = executor.submit(
+                    evaluate_multi,
+                    character, item, method, cdts,
+                    engine=engine, eval_engines=eval_engines,
+                    include_relationships=include_relationships,
                 )
-                bar.set_description(f"Score={mean_score:.4f}")
+                futures[future] = i
 
-    bar.close()
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    multi_results[idx] = future.result()
+                except Exception as exc:
+                    log.error("evaluate_multi() failed for pair #%d: %s", idx + 1, exc)
+                bar.update(1)
+                valid = [r for r in multi_results if r is not None]
+                if valid:
+                    mean_ens = float(np.mean([r["ensemble_mean"] for r in valid]))
+                    bar.set_description(f"Ensemble={mean_ens:.2f}")
 
-    scores = [s for s in results if s is not None]
+        bar.close()
+        valid = [r for r in multi_results if r is not None]
+        if not valid:
+            log.warning("No pairs evaluated")
+            return [] if return_list else 0.0
+
+        # Print per-model and ensemble results
+        for model_name in eval_engines:
+            model_scores = [r["per_model"][model_name] for r in valid]
+            log.info("  %s mean: %.2f", model_name, float(np.mean(model_scores)))
+        ensemble_scores = [r["ensemble_mean"] for r in valid]
+        final_score = float(np.mean(ensemble_scores))
+        log.info("  Ensemble mean: %.2f", final_score)
+        log.info("  Ensemble min (conservative): %.2f", float(np.mean([r["ensemble_min"] for r in valid])))
+        log.info("  Ensemble max (optimistic): %.2f", float(np.mean([r["ensemble_max"] for r in valid])))
+
+        scores = [int(r["ensemble_mean"]) for r in valid]
+    else:
+        results: list[int | None] = [None] * total
+
+        with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+            futures = {}
+            for i, item in enumerate(items):
+                future = executor.submit(
+                    evaluate,
+                    character, item, method, cdts,
+                    engine=engine, eval_engine=eval_engine,
+                    include_relationships=include_relationships,
+                )
+                futures[future] = i
+
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as exc:
+                    log.error("evaluate() failed for pair #%d, skipping: %s", idx + 1, exc)
+                bar.update(1)
+                valid_scores = [s for s in results if s is not None]
+                if valid_scores:
+                    mean_score = float(np.mean(valid_scores))
+                    log.info("#%d/%d NLI Score: %.2f", len(valid_scores), total, mean_score)
+                    bar.set_description(f"Score={mean_score:.4f}")
+
+        bar.close()
+        scores = [s for s in results if s is not None]
 
     if not scores:
         log.warning("No test pairs evaluated for %s with method %s", character, method)
         return [] if return_list else 0.0
 
-    final_score = float(np.mean(scores))
+    if not multi_eval:
+        final_score = float(np.mean(scores))
 
     # Save benchmark results with provenance
     try:
@@ -525,6 +650,7 @@ def main() -> None:
         max_parallel=args.max_parallel,
         cdt_path=args.cdt_path,
         include_relationships=not args.no_relationships,
+        multi_eval=args.multi_eval,
     )
     log.info("Final NLI Score: %.2f", result)
 
