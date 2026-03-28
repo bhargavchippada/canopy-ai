@@ -92,22 +92,26 @@ def make_hypotheses_batch(
 
     statement_candidates: list[str] = []
     gates: list[str] = []
-    for i in range(len(prompts)):
-        str_i = str(i)
-        if str_i in result.successes:
-            try:
-                action_hyps, scene_hyps = parse_hypothesis_response(result.successes[str_i])
-                statement_candidates.extend(action_hyps)
-                gates.extend(scene_hyps)
-            except (ValueError, KeyError) as exc:
-                log.warning("Cluster %s hypothesis parsing failed: %s", str_i, exc)
+    parse_failures = 0
+    for cluster_id, response in result.successes.items():
+        try:
+            action_hyps, scene_hyps = parse_hypothesis_response(response)
+            statement_candidates.extend(action_hyps)
+            gates.extend(scene_hyps)
+        except ValueError as exc:
+            log.warning("Cluster %s hypothesis parsing failed: %s", cluster_id, exc)
+            parse_failures += 1
 
-    if not result.all_succeeded:
+    llm_drops = len(result.exhausted_ids) + len(result.dropped_ids)
+    total_failed = llm_drops + parse_failures
+    if total_failed > 0:
         log.warning(
-            "batch_generate: %d/%d clusters dropped (success_rate=%.1f%%)",
-            len(result.exhausted_ids) + len(result.dropped_ids),
+            "make_hypotheses_batch: %d/%d clusters produced no hypotheses "
+            "(llm_drops=%d, parse_failures=%d)",
+            total_failed,
             len(prompts),
-            result.success_rate * 100,
+            llm_drops,
+            parse_failures,
         )
 
     return statement_candidates, gates

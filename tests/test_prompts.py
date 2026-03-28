@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from canopy.llm import BatchResult
-from canopy.prompts import make_hypotheses_batch, parse_hypothesis_response
+from canopy.prompts import make_hypotheses_batch, parse_hypothesis_response, summarize_triggers
 
 # ---------------------------------------------------------------------------
 # parse_hypothesis_response
@@ -121,8 +121,8 @@ class TestMakeHypothesesBatchHandlesDrops:
             )
         assert len(stmts) == 1
         assert len(gates) == 1
-        assert "1/2 clusters dropped" in caplog.text
-        assert "50.0%" in caplog.text
+        assert "1/2 clusters produced no hypotheses" in caplog.text
+        assert "llm_drops=1" in caplog.text
 
     @patch("canopy.prompts.batch_generate")
     def test_partial_results_with_dropped_ids(self, mock_bg: object, caplog: pytest.LogCaptureFixture) -> None:
@@ -140,7 +140,7 @@ class TestMakeHypothesesBatchHandlesDrops:
                 [],
             )
         assert len(stmts) == 1
-        assert "2/3 clusters dropped" in caplog.text
+        assert "2/3 clusters produced no hypotheses" in caplog.text
 
     @patch("canopy.prompts.batch_generate")
     def test_parsing_failure_skipped(self, mock_bg: object, caplog: pytest.LogCaptureFixture) -> None:
@@ -187,8 +187,8 @@ class TestMakeHypothesesBatchAllDropped:
             )
         assert stmts == []
         assert gates == []
-        assert "3/3 clusters dropped" in caplog.text
-        assert "0.0%" in caplog.text
+        assert "3/3 clusters produced no hypotheses" in caplog.text
+        assert "llm_drops=3" in caplog.text
 
     @patch("canopy.prompts.batch_generate")
     def test_empty_clusters(self, mock_bg: object) -> None:
@@ -200,3 +200,53 @@ class TestMakeHypothesesBatchAllDropped:
         stmts, gates = make_hypotheses_batch([], "Kasumi", "identity", [], [])
         assert stmts == []
         assert gates == []
+
+
+# ---------------------------------------------------------------------------
+# summarize_triggers
+# ---------------------------------------------------------------------------
+
+
+class TestSummarizeTriggers:
+    def test_passthrough_when_8_or_fewer(self) -> None:
+        """Pairs <= 8 pass through without LLM call."""
+        gates = ["q1", "q2"]
+        stmts = ["s1", "s2"]
+        result_gates, result_stmts = summarize_triggers("Kasumi", gates, stmts)
+        assert result_gates == gates
+        assert result_stmts == stmts
+
+    @patch("canopy.prompts.generate")
+    def test_compression_success(self, mock_gen: object) -> None:
+        """When >8 pairs, LLM compresses to top 8."""
+        import json
+        from unittest.mock import MagicMock
+
+        mock_gen = MagicMock(
+            return_value=json.dumps(
+                {  # type: ignore[assignment]
+                    "top8_pairs": [{"scene_check_hypothesis": f"q{i}", "action_hypothesis": f"s{i}"} for i in range(8)]
+                }
+            )
+        )
+        with patch("canopy.prompts.generate", mock_gen):
+            gates = [f"gate_{i}" for i in range(12)]
+            stmts = [f"stmt_{i}" for i in range(12)]
+            result_gates, result_stmts = summarize_triggers("Kasumi", gates, stmts)
+            assert len(result_gates) == 8
+            assert len(result_stmts) == 8
+            assert result_gates[0] == "q0"
+            mock_gen.assert_called_once()
+
+    @patch("canopy.prompts.generate")
+    def test_compression_fallback_on_parse_failure(self, mock_gen: object) -> None:
+        """When LLM returns unparseable response, falls back to first 8."""
+        from unittest.mock import MagicMock
+
+        mock_gen = MagicMock(return_value="not json at all")  # type: ignore[assignment]
+        with patch("canopy.prompts.generate", mock_gen):
+            gates = [f"gate_{i}" for i in range(12)]
+            stmts = [f"stmt_{i}" for i in range(12)]
+            result_gates, result_stmts = summarize_triggers("Kasumi", gates, stmts)
+            assert len(result_gates) == 8
+            assert result_gates[0] == "gate_0"  # original, not compressed
