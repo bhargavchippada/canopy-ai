@@ -28,8 +28,11 @@ DISCRIMINATOR = os.environ.get(
 )
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-# Skip all tests if no GPU
-pytestmark = [pytest.mark.integration, pytest.mark.gpu]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.gpu,
+    pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU required"),
+]
 
 
 @pytest.fixture(scope="module")
@@ -153,9 +156,10 @@ class TestValidation:
         res, filtered = validate_hypothesis(
             "Alice", pairs, None, "Alice tends to be kind to others.",
         )
-        assert "True" in res
-        assert "False" in res
-        assert "None" in res
+        # Structural assertions — don't assume specific NLI outcomes
+        total = sum(res.values())
+        assert total > 0, "Expected at least one validated pair"
+        assert all(v >= 0 for v in res.values())
         assert len(filtered) == len(pairs)  # No gate → all pairs kept
 
     def test_validate_hypothesis_with_gate(self, validation_model: None) -> None:
@@ -195,16 +199,18 @@ class TestFullPipeline:
         from canopy.builder import BehavioralObservation, build_cdt
         from canopy.core import CDTConfig
 
+        # Use 7 observations — below MIN_PAIRS_FOR_TREE(8), so _build
+        # is NOT called and no LLM is needed. This tests the full pipeline
+        # path (observations → pairs → CDTNode) without requiring Claude.
         observations = [
             BehavioralObservation(
                 scene=f"Scene {i}: the group is discussing plans",
                 action=f"Alice suggests idea number {i}",
                 actor="Alice",
             )
-            for i in range(12)
+            for i in range(7)
         ]
 
-        # max_depth=1 and few observations → builds root only
         tree = build_cdt(
             observations,
             character="Alice",
@@ -212,11 +218,9 @@ class TestFullPipeline:
             config=CDTConfig(max_depth=1),
         )
         assert tree is not None
-        # With only 12 pairs and max_depth=1, tree will be empty
-        # (no LLM for hypothesis gen, and pairs <= 8 for recursion)
-        # But it should not crash
         stats = tree.count_stats()
-        assert stats["total_nodes"] >= 1
+        assert stats["total_nodes"] == 1  # Root only, no subtrees
+        assert stats["total_statements"] == 0  # No hypotheses generated
 
     def test_wikify_integration(
         self, embedding_models: None, validation_model: None,

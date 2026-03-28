@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+import numpy as np
 import torch
 from tqdm import tqdm
 
@@ -47,10 +48,11 @@ def check_statement_probs(
     character: str,
     actions: list[str],
     statements: list[str],
-) -> tuple[float, float, float]:
+) -> np.ndarray:
     """Check statement-action NLI probabilities.
 
-    Returns numpy array of [false_score, none_score, true_score].
+    Returns:
+        numpy array of shape (3,) with [false_score, none_score, true_score].
     """
     if _classifier is None:
         raise RuntimeError("Validation model not initialized — call init_models() first")

@@ -66,8 +66,8 @@ See `examples/quickstart.py` for a complete example.
 ## Testing
 
 ```bash
-uv run python -m pytest                    # Unit tests (134 tests, ~10s)
-uv run python -m pytest -m integration     # Integration tests (11 tests, ~23s, needs GPU)
+uv run python -m pytest                         # Unit tests (~140 tests, ~10s)
+uv run python -m pytest -m integration          # Integration tests (11 tests, ~23s, needs GPU)
 uv run python -m pytest --cov=canopy       # With coverage report
 ```
 

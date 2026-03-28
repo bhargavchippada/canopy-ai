@@ -72,10 +72,10 @@ select = ["E", "F", "I", "W"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
-    "integration: tests requiring real GPU models (skip with -m 'not integration')",
+    "integration: tests requiring real GPU models (run with: pytest -m integration -o 'addopts=')",
     "gpu: tests requiring CUDA GPU",
 ]
-addopts = "-m 'not integration'"
+filterwarnings = ["ignore::DeprecationWarning:torch.jit"]
 
 [tool.mypy]
 python_version = "3.11"
