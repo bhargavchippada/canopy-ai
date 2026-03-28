@@ -142,6 +142,36 @@ Input pairs:
 ## Goal
 Produce a rewritten, deduplicated, and compressed set of **exactly 8** pairs that capture the **most important** and **most general** behavioral grounding logic for {character}.
 
+Rewriting is allowed and encouraged to increase:
+- generality
+- coverage across different subsets of scenes
+- clarity
+- non-assertiveness
+
+## Selection Principles (prioritized)
+1. **Coverage**: The 8 pairs should collectively cover the widest range of distinct behavioral patterns and distinct scene triggers.
+2. **Centrality**: Prefer pairs that reflect recurring or core behaviors across many scene-action pairs.
+3. **Specificity without overfitting**: Keep statements general; only keep a specific skill/ability if it appears repeatedly and broadly.
+4. **Non-redundancy**: Each of the 8 pairs must represent a meaningfully different behavior/trigger from the others.
+5. **Pair coherence**: The scene_check_hypothesis must plausibly test for the corresponding action_hypothesis (do not mismatch them).
+
+## Dedup & Merge Rules
+- You may merge multiple similar input pairs into one rewritten pair.
+- If two candidate pairs overlap heavily in either the action or the scene question, combine them into a single more general pair.
+- Do not preserve original wording when a clearer/general rewrite is possible.
+
+## Constraints to Preserve
+### scene_check_hypothesis
+- Must be a **single, simple question**
+- Must explicitly contain the exact phrase: "{character}'s next action"
+- Must target **scene conditions** that could trigger that next action
+- Must be applicable to a **subset** of scenes (not a universal always-true condition)
+
+### action_hypothesis
+- Must be a **single, concise sentence**
+- Must be **non-assertive** (use "may", "tends to", "often appears to", "is described as", "is observed as", etc.)
+- Must not invent backstory or assume prior knowledge
+
 ## Output Format (JSON only)
 Return exactly 8 pairs:
 
@@ -151,12 +181,16 @@ Return exactly 8 pairs:
     {{
       "scene_check_hypothesis": "...",
       "action_hypothesis": "..."
+    }},
+    {{
+      "scene_check_hypothesis": "...",
+      "action_hypothesis": "..."
     }}
   ]
 }}
 ```
 
-## Quality Checklist
+## Quality Checklist (must satisfy)
 * Exactly 8 pairs.
 * No two action_hypothesis items mean the same thing.
 * No two scene_check_hypothesis questions ask the same trigger.
