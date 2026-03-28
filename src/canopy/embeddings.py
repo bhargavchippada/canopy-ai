@@ -39,7 +39,8 @@ def init_models(
 
 def generative_encode(texts: list[str]) -> np.ndarray:
     """Encode texts using the generative model's last hidden state."""
-    assert _generator_embedding is not None, "Call init_models() first"
+    if _generator_embedding is None:
+        raise RuntimeError("Embedding models not initialized — call init_models() first")
     embedding = _generator_embedding(
         **_generator_tokenizer(texts, return_tensors="pt", padding=True).to(_device),
         output_hidden_states=True,
@@ -50,7 +51,8 @@ def generative_encode(texts: list[str]) -> np.ndarray:
 
 def surface_encode(texts: list[str]) -> np.ndarray:
     """Encode texts using the surface (sentence-transformer) model."""
-    assert _surface_embedding is not None, "Call init_models() first"
+    if _surface_embedding is None:
+        raise RuntimeError("Embedding models not initialized — call init_models() first")
     embedding = _surface_embedding.encode(texts, convert_to_tensor=True)
     embedding = F.normalize(embedding, p=2, dim=1)
     return embedding.detach().cpu().numpy()

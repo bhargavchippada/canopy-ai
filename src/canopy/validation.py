@@ -29,7 +29,8 @@ def check_scene(texts: list[str], questions: list[str]) -> list[bool | None]:
 
     Returns a list of True/None/False per (text, question) pair.
     """
-    assert _classifier is not None, "Call init_models() first"
+    if _classifier is None:
+        raise RuntimeError("Validation model not initialized — call init_models() first")
     prompts = [
         f"Scene: {text}\n\nQuestion: {question}\n\nDirectly answer only yes/no/unknown."
         for text, question in zip(texts, questions)
@@ -51,7 +52,8 @@ def check_statement_probs(
 
     Returns numpy array of [false_score, none_score, true_score].
     """
-    assert _classifier is not None, "Call init_models() first"
+    if _classifier is None:
+        raise RuntimeError("Validation model not initialized — call init_models() first")
     prompts = [
         f"""Character: {character}
 

@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
-
-from tqdm import tqdm
 
 
 @dataclass(frozen=True)
@@ -90,9 +87,15 @@ class CDTNode:
         _hypothesize = hypothesis_fn or make_hypotheses_batch
         _summarize = summarize_fn or summarize_triggers
 
-        clusters = _select_clusters(character, pairs, n_in_cluster_case=16, n_in_cluster_sample=8, n_max_cluster=8, bs=8)
+        clusters = _select_clusters(
+            character, pairs,
+            n_in_cluster_case=16, n_in_cluster_sample=8, n_max_cluster=8, bs=8,
+        )
         print(f"  Making hypotheses for {len(clusters)} clusters in parallel...")
-        statement_candidates, gates = _hypothesize(clusters, character, goal_topic, established_statements + self.statements, gate_path)
+        statement_candidates, gates = _hypothesize(
+            clusters, character, goal_topic,
+            established_statements + self.statements, gate_path,
+        )
 
         gates, statement_candidates = _summarize(character, gates, statement_candidates)
         global_statements: list[str] = []
@@ -162,3 +165,40 @@ class CDTNode:
             lines.append(f'{prefix}IF "{gate}":')
             lines.append(child.verbalize(indent + 1))
         return "\n".join(lines) if lines else f"{prefix}(empty)"
+
+
+# ---------------------------------------------------------------------------
+# Convenience builder
+# ---------------------------------------------------------------------------
+
+ATTRIBUTE_TOPICS = ("identity", "personality", "ability", "relationship")
+MIN_RELATION_PAIRS = 16
+
+
+def build_character_cdts(
+    character: str,
+    pairs: list[dict],
+    other_characters: list[str],
+    config: CDTConfig | None = None,
+) -> tuple[dict[str, CDTNode], dict[str, CDTNode]]:
+    """Build attribute and relationship CDTs for a character.
+
+    Returns (topic2cdt, rel_topic2cdt).
+    """
+    cfg = config or CDTConfig()
+
+    topic2cdt: dict[str, CDTNode] = {}
+    for attribute in ATTRIBUTE_TOPICS:
+        goal_topic = f"{character}'s {attribute}"
+        print(f"\n=== Building CDT: {goal_topic} ===")
+        topic2cdt[goal_topic] = CDTNode(character, goal_topic, pairs, config=cfg)
+
+    rel_topic2cdt: dict[str, CDTNode] = {}
+    for other in other_characters:
+        goal_topic = f"{character}'s interaction with {other}"
+        relation_pairs = [d for d in pairs if other in d["last_character"]]
+        if len(relation_pairs) >= MIN_RELATION_PAIRS:
+            print(f"\n=== Building CDT: {goal_topic} ({len(relation_pairs)} pairs) ===")
+            rel_topic2cdt[goal_topic] = CDTNode(character, goal_topic, relation_pairs, config=cfg)
+
+    return topic2cdt, rel_topic2cdt

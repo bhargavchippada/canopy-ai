@@ -11,7 +11,7 @@ import pickle
 
 import torch
 
-from canopy.core import CDTConfig, CDTNode
+from canopy.core import CDTConfig, build_character_cdts
 from canopy.data import load_ar_pairs, load_character_metadata
 from canopy.embeddings import init_models as init_embedding_models
 from canopy.llm import ClaudeCodeAdapter, set_adapter
@@ -37,7 +37,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_arg_parser().parse_args()
-
     device = torch.device(f"cuda:{args.device_id}")
 
     # Configure LLM adapter
@@ -46,16 +45,13 @@ def main() -> None:
     # Load models
     print("Loading embedding models...")
     init_embedding_models(args.surface_embedder_path, args.generator_embedder_path, device)
-
     print("Loading validation model...")
     init_validation_models(args.discriminator_path, device)
 
     # Load data
     all_characters, character2artifact, band2members = load_character_metadata()
     artifact = character2artifact[args.character]
-    artifact_characters = all_characters[artifact]["major"]
-    other_characters = [c for c in artifact_characters if c != args.character]
-
+    other_characters = [c for c in all_characters[artifact]["major"] if c != args.character]
     pairs = load_ar_pairs(args.character, character2artifact, band2members)["train"]
 
     config = CDTConfig(
@@ -65,24 +61,8 @@ def main() -> None:
         threshold_filter=args.threshold_filter,
     )
 
-    # Build attribute CDTs
-    topic2cdt: dict[str, CDTNode] = {}
-    for attribute in ["identity", "personality", "ability", "relationship"]:
-        goal_topic = f"{args.character}'s {attribute}"
-        print(f"\n=== Building CDT: {goal_topic} ===")
-        topic2cdt[goal_topic] = CDTNode(args.character, goal_topic, pairs, config=config)
-
-    # Build relationship CDTs
-    rel_topic2cdt: dict[str, CDTNode] = {}
-    for other_character in other_characters:
-        goal_topic = f"{args.character}'s interaction with {other_character}"
-        relation_pairs = [d for d in pairs if other_character in d["last_character"]]
-
-        if len(relation_pairs) >= 16:
-            print(f"\n=== Building CDT: {goal_topic} ({len(relation_pairs)} pairs) ===")
-            rel_topic2cdt[goal_topic] = CDTNode(
-                args.character, goal_topic, relation_pairs, config=config,
-            )
+    # Build CDTs
+    topic2cdt, rel_topic2cdt = build_character_cdts(args.character, pairs, other_characters, config)
 
     # Save
     output_path = f"packages/{args.character}.cdt.v3.1.package.relation.pkl"
@@ -90,10 +70,7 @@ def main() -> None:
         pickle.dump({"topic2cdt": topic2cdt, "rel_topic2cdt": rel_topic2cdt}, f)
 
     print(f"\nSaved to {output_path}")
-
-    # Print summary
-    total_stmts = sum(len(cdt.statements) for cdt in topic2cdt.values())
-    total_stmts += sum(len(cdt.statements) for cdt in rel_topic2cdt.values())
+    total_stmts = sum(len(cdt.statements) for cdt in [*topic2cdt.values(), *rel_topic2cdt.values()])
     print(f"  Attribute topics: {len(topic2cdt)}")
     print(f"  Relationship topics: {len(rel_topic2cdt)}")
     print(f"  Root statements: {total_stmts}")

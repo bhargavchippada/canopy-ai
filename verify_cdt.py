@@ -109,7 +109,7 @@ def verify_package(path: str) -> dict:
         print(f"  Total statements: {stats['total_statements']}")
         print(f"  Total gates: {stats['total_gates']}")
         print(f"  Max depth: {stats['max_depth']}")
-        print(f"\n  Tree structure:")
+        print("\n  Tree structure:")
         print(cdt.verbalize(indent=2))
         print()
 
@@ -128,7 +128,7 @@ def verify_package(path: str) -> dict:
         print(f"  Total statements: {stats['total_statements']}")
         print(f"  Total gates: {stats['total_gates']}")
         print(f"  Max depth: {stats['max_depth']}")
-        print(f"\n  Tree structure:")
+        print("\n  Tree structure:")
         print(cdt.verbalize(indent=2))
         print()
 
