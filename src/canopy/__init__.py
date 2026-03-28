@@ -6,6 +6,7 @@ Library usage::
     from canopy.builder import BehavioralObservation, build_cdt, build_character_profile
     from canopy.wikify import wikify_profile, wikify_tree
     from canopy.cluster import KMeansCluster, HDBSCANCluster
+    from canopy.llm import batch_generate, BatchResult
 """
 
 __version__ = "0.1.0"

@@ -2,6 +2,8 @@
 
 Uses claude-agent-sdk with optimized options (tools=[], setting_sources=[])
 for fast subprocess startup. Supports parallel generation via generate_many().
+
+Includes batch_generate() for resilient batch LLM calls with drop tracking.
 """
 
 from __future__ import annotations
@@ -10,6 +12,8 @@ import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Protocol
 
 DEFAULT_MODEL = "claude-haiku-4-5"
@@ -94,9 +98,14 @@ class ClaudeCodeAdapter:
                 error_str = str(exc).lower()
                 # Retry on transient errors (rate limits, CLI crashes)
                 if any(kw in error_str for kw in ("rate_limit", "exit code 1", "timeout", "timed out")):
-                    wait = 2 ** attempt
-                    log.warning("LLM call failed (attempt %d/%d), retrying in %ds: %s",
-                                attempt + 1, self._max_retries + 1, wait, exc)
+                    wait = 2**attempt
+                    log.warning(
+                        "LLM call failed (attempt %d/%d), retrying in %ds: %s",
+                        attempt + 1,
+                        self._max_retries + 1,
+                        wait,
+                        exc,
+                    )
                     await asyncio.sleep(wait)
                     continue
                 raise  # Non-transient error — don't retry
@@ -216,6 +225,134 @@ def extract_json(response: str) -> Any:
                 continue
 
     raise ValueError(f"No valid JSON found in LLM response (length={len(response)})")
+
+
+# ---------------------------------------------------------------------------
+# Batch-resilient generation
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BatchResult:
+    """Result of a batch LLM generation with drop tracking.
+
+    Attributes:
+        successes: Immutable mapping of item ID to LLM response for items that succeeded.
+        dropped_ids: Frozenset of IDs that were sent but got no response and
+            exhausted retries.
+        exhausted_ids: Frozenset of IDs that hit max_attempts or were abandoned
+            due to no progress in a retry round.
+    """
+
+    successes: MappingProxyType[str, str]
+    dropped_ids: frozenset[str]
+    exhausted_ids: frozenset[str]
+
+    @property
+    def all_succeeded(self) -> bool:
+        """True if every item received a non-empty response."""
+        return len(self.dropped_ids) == 0 and len(self.exhausted_ids) == 0
+
+    @property
+    def success_rate(self) -> float:
+        """Fraction of items that succeeded (1.0 when empty input)."""
+        total = len(self.successes) + len(self.dropped_ids) + len(self.exhausted_ids)
+        return len(self.successes) / total if total > 0 else 1.0
+
+
+def batch_generate(
+    items: list[tuple[str, str]],
+    *,
+    model: str | None = None,
+    max_attempts: int = 3,
+    adapter: LLMAdapter | None = None,
+) -> BatchResult:
+    """Generate LLM responses for a batch of (id, prompt) pairs with retry on drops.
+
+    Handles the case where the LLM silently drops items from a batch —
+    returning M<N results with no error. Tracks attempts per ID and
+    marks items as exhausted after max_attempts.
+
+    Args:
+        items: List of (id, prompt) tuples. IDs must be unique.
+        model: Model override for generation.
+        max_attempts: Max retry attempts per dropped item before marking exhausted.
+        adapter: LLM adapter to use. Uses module default if None.
+
+    Returns:
+        BatchResult with successes, dropped_ids, and exhausted_ids.
+
+    Raises:
+        ValueError: If duplicate IDs are provided.
+    """
+    if not items:
+        return BatchResult(
+            successes=MappingProxyType({}),
+            dropped_ids=frozenset(),
+            exhausted_ids=frozenset(),
+        )
+
+    ids = [item_id for item_id, _ in items]
+    id_set = set(ids)
+    if len(ids) != len(id_set):
+        from collections import Counter
+        dupes = sorted(id_ for id_, c in Counter(ids).items() if c > 1)
+        raise ValueError(f"Duplicate IDs provided: {dupes}")
+
+    used_adapter = adapter if adapter is not None else _default_adapter
+
+    pending: dict[str, str] = {item_id: prompt for item_id, prompt in items}
+    attempts: dict[str, int] = {item_id: 0 for item_id in pending}
+    successes: dict[str, str] = {}
+    exhausted: set[str] = set()
+
+    while pending:
+        batch_ids = list(pending.keys())
+        batch_prompts = [pending[bid] for bid in batch_ids]
+
+        try:
+            responses = used_adapter.generate_many(batch_prompts, model=model)
+        except Exception as exc:
+            log.warning(
+                "batch_generate: generate_many raised %s for %d items: %s",
+                type(exc).__name__,
+                len(batch_ids),
+                exc,
+            )
+            for bid in batch_ids:
+                attempts[bid] += 1
+                if attempts[bid] >= max_attempts:
+                    exhausted.add(bid)
+                    del pending[bid]
+            if not pending:
+                break
+            continue
+
+        resolved_this_round = 0
+        for i, bid in enumerate(batch_ids):
+            response = responses[i] if i < len(responses) else ""
+            if response:  # non-empty string counts as success
+                successes[bid] = response
+                del pending[bid]
+                resolved_this_round += 1
+            else:
+                attempts[bid] += 1
+                if attempts[bid] >= max_attempts:
+                    exhausted.add(bid)
+                    del pending[bid]
+
+        # No progress — break to avoid infinite loop
+        if resolved_this_round == 0 and pending:
+            for bid in list(pending.keys()):
+                exhausted.add(bid)
+                del pending[bid]
+            break
+
+    return BatchResult(
+        successes=MappingProxyType(successes),
+        dropped_ids=frozenset(pending.keys()),
+        exhausted_ids=frozenset(exhausted),
+    )
 
 
 # ---------------------------------------------------------------------------

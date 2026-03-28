@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from canopy.llm import (
+    BatchResult,
     ClaudeCodeAdapter,
+    batch_generate,
     extract_json,
     generate,
     generate_many,
@@ -28,7 +31,7 @@ class TestExtractJson:
         assert extract_json(response) == {"key": "value"}
 
     def test_fenced_block_with_surrounding_text(self) -> None:
-        response = 'Some preamble\n```json\n[1, 2, 3]\n```\nSome epilogue'
+        response = "Some preamble\n```json\n[1, 2, 3]\n```\nSome epilogue"
         assert extract_json(response) == [1, 2, 3]
 
     def test_raw_json_object(self) -> None:
@@ -319,10 +322,12 @@ class TestAsyncGenerate:
         """Multiple text blocks are concatenated."""
 
         async def multi_block_gen(prompt: str, options: Any = None):
-            yield MockAssistantMessage(content=[
-                MockTextBlock(text="part1 "),
-                MockTextBlock(text="part2"),
-            ])
+            yield MockAssistantMessage(
+                content=[
+                    MockTextBlock(text="part1 "),
+                    MockTextBlock(text="part2"),
+                ]
+            )
 
         mock_sdk = MagicMock()
         mock_sdk.ClaudeAgentOptions = MagicMock
@@ -410,6 +415,7 @@ class TestSessionGenerate:
         mock_sdk.ClaudeSDKClient = MagicMock(return_value=mock_client)
 
         with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+
             async def run_twice():
                 r1 = await adapter._session_generate("p1", "m")
                 r2 = await adapter._session_generate("p2", "m")
@@ -433,6 +439,7 @@ class TestModuleFunctions:
         try:
             # Save original
             import canopy.llm
+
             original = canopy.llm._default_adapter
 
             set_adapter(mock_adapter)
@@ -447,6 +454,7 @@ class TestModuleFunctions:
         mock_adapter.generate.return_value = "ok"
 
         import canopy.llm
+
         original = canopy.llm._default_adapter
         try:
             set_adapter(mock_adapter)
@@ -454,3 +462,223 @@ class TestModuleFunctions:
             mock_adapter.generate.assert_called_with("prompt", model="special-model")
         finally:
             set_adapter(original)
+
+
+# ---------------------------------------------------------------------------
+# BatchResult
+# ---------------------------------------------------------------------------
+
+
+class TestBatchResult:
+    def test_all_succeeded(self) -> None:
+        result = BatchResult(
+            successes=MappingProxyType({"a": "resp_a", "b": "resp_b"}),
+            dropped_ids=frozenset(),
+            exhausted_ids=frozenset(),
+        )
+        assert result.all_succeeded is True
+        assert result.success_rate == 1.0
+
+    def test_with_drops_and_exhausted(self) -> None:
+        result = BatchResult(
+            successes=MappingProxyType({"a": "resp_a"}),
+            dropped_ids=frozenset({"b"}),
+            exhausted_ids=frozenset({"c"}),
+        )
+        assert result.all_succeeded is False
+        assert result.success_rate == pytest.approx(1 / 3)
+
+    def test_success_rate_calculation(self) -> None:
+        result = BatchResult(
+            successes=MappingProxyType({"a": "x", "b": "y", "c": "z"}),
+            dropped_ids=frozenset(),
+            exhausted_ids=frozenset({"d"}),
+        )
+        assert result.success_rate == pytest.approx(0.75)
+
+    def test_empty_result(self) -> None:
+        result = BatchResult(
+            successes=MappingProxyType({}),
+            dropped_ids=frozenset(),
+            exhausted_ids=frozenset(),
+        )
+        assert result.all_succeeded is True
+        assert result.success_rate == 1.0
+
+    def test_frozen(self) -> None:
+        result = BatchResult(
+            successes=MappingProxyType({}),
+            dropped_ids=frozenset(),
+            exhausted_ids=frozenset(),
+        )
+        with pytest.raises(AttributeError):
+            result.successes = MappingProxyType({})  # type: ignore[misc]
+
+    def test_successes_immutable(self) -> None:
+        result = BatchResult(
+            successes=MappingProxyType({"a": "x"}),
+            dropped_ids=frozenset(),
+            exhausted_ids=frozenset(),
+        )
+        with pytest.raises(TypeError):
+            result.successes["b"] = "y"  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
+# batch_generate
+# ---------------------------------------------------------------------------
+
+
+class TestBatchGenerate:
+    def _mock_adapter(self, side_effects: list[list[str]]) -> MagicMock:
+        """Create a mock adapter whose generate_many returns successive side_effects."""
+        adapter = MagicMock()
+        adapter.generate_many = MagicMock(side_effect=side_effects)
+        return adapter
+
+    def test_all_succeed(self) -> None:
+        adapter = self._mock_adapter([["resp_a", "resp_b", "resp_c"]])
+        result = batch_generate(
+            [("a", "prompt_a"), ("b", "prompt_b"), ("c", "prompt_c")],
+            adapter=adapter,
+        )
+        assert result.all_succeeded is True
+        assert result.successes == {"a": "resp_a", "b": "resp_b", "c": "resp_c"}
+        assert result.dropped_ids == frozenset()
+        assert result.exhausted_ids == frozenset()
+
+    def test_empty_input(self) -> None:
+        result = batch_generate([])
+        assert result.all_succeeded is True
+        assert result.successes == {}
+
+    def test_with_drops_retries_and_exhausts(self) -> None:
+        """Item 'b' returns empty string every time, should be exhausted after max_attempts."""
+        adapter = self._mock_adapter(
+            [
+                ["resp_a", "", "resp_c"],  # round 1: b drops
+                [""],  # round 2: b drops again
+                [""],  # round 3: b drops again → exhausted
+            ]
+        )
+        result = batch_generate(
+            [("a", "pa"), ("b", "pb"), ("c", "pc")],
+            adapter=adapter,
+            max_attempts=3,
+        )
+        assert result.successes == {"a": "resp_a", "c": "resp_c"}
+        assert "b" in result.exhausted_ids
+        assert result.all_succeeded is False
+
+    def test_retry_succeeds(self) -> None:
+        """Item 'b' fails first call, succeeds on retry."""
+        adapter = self._mock_adapter(
+            [
+                ["resp_a", ""],  # round 1: b drops
+                ["resp_b"],  # round 2: b succeeds
+            ]
+        )
+        result = batch_generate(
+            [("a", "pa"), ("b", "pb")],
+            adapter=adapter,
+            max_attempts=3,
+        )
+        assert result.successes == {"a": "resp_a", "b": "resp_b"}
+        assert result.all_succeeded is True
+
+    def test_max_attempts_honored(self) -> None:
+        """With max_attempts=1, items are exhausted after a single empty response."""
+        adapter = self._mock_adapter(
+            [
+                ["resp_a", ""],  # round 1: b drops → exhausted (max_attempts=1)
+            ]
+        )
+        result = batch_generate(
+            [("a", "pa"), ("b", "pb")],
+            adapter=adapter,
+            max_attempts=1,
+        )
+        assert result.successes == {"a": "resp_a"}
+        assert "b" in result.exhausted_ids
+
+    def test_duplicate_ids_raises(self) -> None:
+        with pytest.raises(ValueError, match="Duplicate IDs"):
+            batch_generate([("a", "p1"), ("a", "p2")])
+
+    def test_exception_handling(self) -> None:
+        """generate_many raises an exception — items should get retried."""
+        adapter = MagicMock()
+        adapter.generate_many = MagicMock(
+            side_effect=[
+                RuntimeError("connection failed"),  # round 1: exception
+                ["resp_a", "resp_b"],  # round 2: success
+            ]
+        )
+        result = batch_generate(
+            [("a", "pa"), ("b", "pb")],
+            adapter=adapter,
+            max_attempts=3,
+        )
+        assert result.successes == {"a": "resp_a", "b": "resp_b"}
+        assert result.all_succeeded is True
+
+    def test_no_progress_breaks(self) -> None:
+        """If generate_many always returns empty strings, loop terminates."""
+        adapter = self._mock_adapter(
+            [
+                ["", ""],  # round 1: nothing resolved, no progress → all exhausted
+            ]
+        )
+        result = batch_generate(
+            [("a", "pa"), ("b", "pb")],
+            adapter=adapter,
+            max_attempts=5,
+        )
+        assert result.successes == {}
+        assert result.exhausted_ids == frozenset({"a", "b"})
+
+    def test_custom_adapter_used(self) -> None:
+        """Verify the custom adapter is called, not the module default."""
+        custom = self._mock_adapter([["custom_resp"]])
+        result = batch_generate([("x", "px")], adapter=custom)
+        assert result.successes == {"x": "custom_resp"}
+        custom.generate_many.assert_called_once()
+
+    def test_uses_default_adapter(self) -> None:
+        """When no adapter passed, uses the module-level default."""
+        mock_adapter = MagicMock()
+        mock_adapter.generate_many.return_value = ["default_resp"]
+
+        import canopy.llm
+
+        original = canopy.llm._default_adapter
+        try:
+            set_adapter(mock_adapter)
+            result = batch_generate([("a", "pa")])
+            assert result.successes == {"a": "default_resp"}
+            mock_adapter.generate_many.assert_called_once()
+        finally:
+            set_adapter(original)
+
+    def test_model_passed_through(self) -> None:
+        """Verify model parameter is forwarded to generate_many."""
+        custom = self._mock_adapter([["resp"]])
+        batch_generate([("a", "pa")], model="special-model", adapter=custom)
+        custom.generate_many.assert_called_with(["pa"], model="special-model")
+
+    def test_short_response_list(self) -> None:
+        """If generate_many returns fewer items than sent, missing ones count as drops."""
+        adapter = self._mock_adapter(
+            [
+                ["resp_a"],  # only 1 response for 3 items → b,c are drops
+                ["", ""],  # round 2: b,c still empty → no progress → exhausted
+            ]
+        )
+        result = batch_generate(
+            [("a", "pa"), ("b", "pb"), ("c", "pc")],
+            adapter=adapter,
+            max_attempts=3,
+        )
+        assert result.successes == {"a": "resp_a"}
+        assert "b" in result.exhausted_ids
+        assert "c" in result.exhausted_ids
