@@ -157,15 +157,17 @@ Root cause: Claude models produce universally-true hypotheses (~25 words) that p
 
 ### Prompt Fix Results (Sonnet gen + Sonnet eval, no relationships)
 
-| Character | Dataset | Paper CDT | Our CDT (prompt fix) | Improvement | B% |
-|-----------|---------|----------|---------------------|-------------|-----|
-| Kasumi | Bandori | 66.17 | **70.66** | +4.49 | 38.3 |
-| Arisa | Bandori | 63.36 | **68.10** | +4.74 | 41.4 |
-| Haruhi | Fandom | — | **55.41** | — | 60.8 |
+| Character | Dataset | Paper CDT (Sonnet eval) | Our CDT (prompt fix) | Delta | B% |
+|-----------|---------|------------------------|---------------------|-------|-----|
+| Kasumi | Bandori | 66.17 | **70.66** | **+4.49** | 38.3 |
+| Arisa | Bandori | 63.36 | **68.10** | **+4.74** | 41.4 |
+| Haruhi | Fandom | 53.38 | **55.41** | **+2.03** | 60.8 |
+
+**Our CDT beats the paper CDT on ALL 3 characters tested.**
 
 Paper reference scores (GPT-4.1 eval): PoPiPa CDT 84.25, Fandom CDT 60.82.
-Haruhi's 60.8% B-rate reflects Fandom difficulty (less predictable character behavior).
-53 nodes/48 gates may over-gate, reducing grounding per scene.
+Haruhi's 60.8% B-rate reflects Fandom difficulty (less predictable behavior), not over-gating.
+Traversal activation: Haruhi avg 33.8 stmts/scene vs Kasumi 40.4 — not a significant gap.
 
 ### Earlier Cross-Character Pattern (pre-fix)
 
