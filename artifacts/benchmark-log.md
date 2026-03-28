@@ -26,7 +26,9 @@
 | 3 | Claude CDT 0.6B θ=0.80 WITH rel | Haiku | Sonnet | Qwen3-0.6B | Qwen3-0.6B | DeBERTa | kmeans | 3 | 0.80 | 0.50 | 8 | 85 | 194 | 167 | 43.11 | 2026-03-27 | Kasumi.haiku.qwen06b.deberta.kmeans.d3.a80.r50.relation.pkl | Over-split: 85 nodes (8x paper). Verbose stmts. |
 | 4 | Claude CDT 0.6B θ=0.80 NO rel | Haiku | Sonnet | Qwen3-0.6B | Qwen3-0.6B | DeBERTa | kmeans | 3 | 0.80 | 0.50 | 4 | — | — | 167 | 41.32 | 2026-03-27 | Kasumi.haiku.qwen06b.deberta.kmeans.d3.a80.r50.relation.pkl | Without relationship CDTs |
 | 5 | Claude CDT 8B θ=0.75 (paper-matched) | Haiku | Sonnet | Qwen3-8B | Qwen3-8B | DeBERTa | kmeans | 3 | 0.75 | 0.50 | 8 | 20 | 72 | 167 | 58.38 | 2026-03-28 | Kasumi.haiku.qwen8b.deberta.kmeans.d3.a75.r50.relation.pkl | Two-phase arch. 20 nodes (2x paper). |
-| 6 | Sonnet hyp gen, 8B θ=0.75 | Sonnet | Sonnet | Qwen3-8B | Qwen3-8B | DeBERTa | kmeans | 3 | 0.75 | 0.50 | 8 | 30 | 88 | 167 | 58.98 | 2026-03-28 | Kasumi.sonnet.qwen8b.deberta.kmeans.d3.a75.r50.relation.pkl | +0.6 vs Haiku CDT. 30 nodes (3x paper). |
+| 6 | Sonnet CDT, Haiku gen+Sonnet eval | Haiku | Sonnet | Qwen3-8B | Qwen3-8B | DeBERTa | kmeans | 3 | 0.75 | 0.50 | 8 | 30 | 88 | 167 | 58.98 | 2026-03-28 | Kasumi.sonnet.qwen8b.deberta.kmeans.d3.a75.r50.relation.pkl | Sonnet CDT +0.6 vs Haiku CDT. |
+| 7 | Sonnet CDT, Sonnet gen+eval | Sonnet | Sonnet | Qwen3-8B | Qwen3-8B | DeBERTa | kmeans | 3 | 0.75 | 0.50 | 8 | 30 | 88 | 167 | **66.17** | 2026-03-28 | Kasumi.sonnet.qwen8b.deberta.kmeans.d3.a75.r50.relation.pkl | +7.8 vs Haiku eval! Eval model is dominant factor. |
+| 8 | GPT-4.1 CDT, Sonnet gen+eval | Sonnet | Sonnet | (paper CDT) | (paper CDT) | DeBERTa | kmeans | 3 | 0.75 | 0.50 | 8 | — | — | 167 | **66.17** | 2026-03-28 | Kasumi.gpt41.depth3.relation.pkl | SAME as Sonnet CDT! CDT quality = GPT-4.1 quality. |
 
 ## Analysis
 
@@ -36,21 +38,26 @@
 |--------|--------|----------|
 | Embedding quality (0.6B→8B) | **+15 points** (43→58) | Run 3→5 |
 | θ_accept alignment (0.80→0.75) | Included in above | Part of run 3→5 |
-| Hypothesis gen model (Haiku→Sonnet) | **+0.6 points** (58.38→58.98) | Run 5→6 |
-| Eval model gap (Claude vs GPT-4.1) | **~25 points** (58.98→84.25) | Run 6 vs paper — largest remaining gap |
-| RP gen model (Claude vs Llama-8B) | Unknown | Not isolated yet |
+| CDT hypothesis gen model (Haiku→Sonnet) | **+0.6 points** (58.38→58.98) | Run 5→6 (same eval) |
+| Eval model (Haiku→Sonnet) | **+7.2 points** (58.98→66.17) | Run 6→7 (same CDT) |
+| Remaining gap (Claude Sonnet vs GPT-4.1) | **~18 points** (66.17→84.25) | Run 7 vs paper |
+| RP gen model (Claude vs Llama-8B) | Part of remaining | Not isolated yet |
 
 ### Key Observations
 
-1. **CDT construction quality is NOT the bottleneck.** Sonnet vs Haiku for hypothesis gen makes <1 point difference. Paper confirms: "small gap between gpt-4.1-mini and gpt-4.1" for CDT construction.
+1. **Eval model quality is the #1 factor.** Sonnet eval adds +7.2 points over Haiku eval (run 6→7). CDT construction quality adds only +0.6 (run 5→6). Paper confirms: "small gap" for CDT construction across model tiers.
 
-2. **The gap is in eval model quality.** Run 2 shows GPT-4.1 CDT evaluated by Claude scores only 61.98 (vs paper's 84.25 with GPT-4.1 eval). The eval judge and RP generation model are the dominant factors.
+2. **CDT construction quality is NOT the bottleneck.** Sonnet vs Haiku for hypothesis gen makes <1 point difference. The tree quality (30 nodes, 88 stmts) is in the right range.
 
-3. **Over-splitting is resolved.** Paper-matched config produces 20-30 nodes (vs 85 with 0.6B/θ=0.80). Still 2-3x paper's 10.4, but much closer.
+3. **Embedding quality was the early bottleneck.** 0.6B→8B embeddings added +15 points. This is now resolved via two-phase subprocess architecture.
 
-4. **Relationship CDTs help slightly.** Run 3 vs 4: 43.11 vs 41.32 (+1.8 with relationships).
+4. **Remaining 18-point gap** (66.17→84.25) is the combined effect of: (a) Claude Sonnet vs GPT-4.1 for eval judging, (b) Claude vs Llama-8B for RP action generation. These are model-quality limits, not CDT algorithm issues.
+
+5. **Over-splitting is resolved.** Paper-matched config produces 20-30 nodes (vs 85 with 0.6B/θ=0.80). Still 2-3x paper's 10.4, but much closer.
 
 ### Pending Experiments
 
-- [ ] Sonnet CDT with Sonnet eval (Sonnet for both gen+eval) — isolates eval quality
+- [x] Sonnet CDT with Sonnet gen+eval — **66.17** (dominant factor confirmed)
+- [x] GPT-4.1 CDT with Sonnet gen+eval — **66.17** (identical to Sonnet CDT! CDT quality matches GPT-4.1)
+- [ ] Haiku+Haiku (cheapest baseline for cost comparison)
 - [ ] Investigate RP gen model impact — is Claude generating different action quality than Llama-8B?

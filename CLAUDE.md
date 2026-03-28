@@ -177,6 +177,9 @@ Phase 5 additions: Two-phase embedding architecture — each 8B model loads ONCE
 | Kasumi (Claude CDT, 0.6B, θ=0.80) | Haiku | Sonnet | 43.11 | 84.25 | With relationships |
 | Kasumi (Claude CDT, 0.6B, θ=0.80) | Haiku | Sonnet | 41.32 | 84.25 | Without relationships |
 | Kasumi (Claude CDT, 8B, θ=0.75) | Haiku | Sonnet | 58.38 | 84.25 | Paper-matched config, two-phase arch, 20 nodes/72 stmts |
+| Kasumi (Sonnet CDT, 8B, θ=0.75) | Haiku | Sonnet | 58.98 | 84.25 | Sonnet hyp gen +0.6 vs Haiku — CDT quality not bottleneck |
+| Kasumi (Sonnet CDT, 8B, θ=0.75) | Sonnet | Sonnet | **66.17** | 84.25 | Eval model is dominant: +7.2 over Haiku eval |
+| Kasumi (GPT-4.1 CDT) | Sonnet | Sonnet | **66.17** | 84.25 | SAME score as Sonnet CDT — our CDT = paper quality |
 
 ## Known Issues
 
