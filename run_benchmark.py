@@ -62,6 +62,7 @@ _GEN_SHORT: dict[str, str] = {
     "claude-haiku-4-5": "haiku",
     "claude-sonnet-4-6": "sonnet",
     "gpt-4.1": "gpt41",
+    "llama-local": "llama",
 }
 
 
@@ -162,6 +163,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Model for eval scoring (default: claude-sonnet-4-6)",
     )
 
+    parser.add_argument(
+        "--generator_path",
+        type=str,
+        default=None,
+        help="Path to local HF model for RP generation (e.g. ~/models/Llama-3.1-8B-Instruct). "
+             "When set, --engine becomes a label and the local model is used for gen.",
+    )
     parser.add_argument(
         "--max_parallel",
         type=int,
@@ -476,6 +484,31 @@ def main() -> None:
     )
 
     args = build_arg_parser().parse_args()
+
+    # Set up adapter: DispatchAdapter when local generator is specified
+    if args.generator_path:
+        from canopy.llm import (
+            ClaudeCodeAdapter,
+            DispatchAdapter,
+            TransformersAdapter,
+            set_adapter,
+        )
+
+        local_adapter = TransformersAdapter(
+            model_path=args.generator_path,
+            device=f"cuda:{args.device_id}",
+        )
+        claude_adapter = ClaudeCodeAdapter()
+        dispatch = DispatchAdapter(
+            adapters={args.engine: local_adapter},
+            default=claude_adapter,
+        )
+        set_adapter(dispatch)
+        log.info(
+            "Using local model %s for gen (%s), Claude for eval (%s)",
+            args.generator_path, args.engine, args.eval_engine,
+        )
+
     result = benchmark(
         args.character,
         args.method,

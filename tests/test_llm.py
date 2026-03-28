@@ -734,3 +734,190 @@ class TestSessionGenerateGuard:
         )
         with pytest.raises(RuntimeError, match="reuse_session=True"):
             asyncio.run(adapter._session_generate("prompt", "m"))
+
+
+# ---------------------------------------------------------------------------
+# TransformersAdapter
+# ---------------------------------------------------------------------------
+
+
+class TestTransformersAdapter:
+    """Tests for TransformersAdapter (mocked, no GPU)."""
+
+    def test_generate_appends_answer_suffix(self) -> None:
+        from canopy.llm import TransformersAdapter
+
+        adapter = TransformersAdapter(model_path="/fake", device="cpu")
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.encode.return_value = [0, 10]  # newline token = 10
+        mock_input = MagicMock()
+        mock_input.input_ids = MagicMock(shape=[1, 5])
+        mock_input.to.return_value = mock_input
+        mock_tokenizer.return_value = mock_input
+
+        import torch
+
+        mock_model = MagicMock()
+        mock_model.generate.return_value = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 8]])
+        mock_tokenizer.decode.return_value = "Alice helped Bob\nassistant"
+
+        adapter._model = mock_model
+        adapter._tokenizer = mock_tokenizer
+
+        result = adapter.generate("test prompt")
+
+        # Verify suffix appended
+        call_args = mock_tokenizer.call_args[0][0]
+        assert call_args.endswith("\nAnswer:")
+        # Verify newline stripping + "assistant" removal
+        assert result == "Alice helped Bob"
+
+    def test_generate_greedy_decoding(self) -> None:
+        from canopy.llm import TransformersAdapter
+
+        adapter = TransformersAdapter(model_path="/fake", device="cpu")
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.encode.return_value = [10]
+        mock_input = MagicMock()
+        mock_input.input_ids = MagicMock(shape=[1, 3])
+        mock_input.to.return_value = mock_input
+        mock_tokenizer.return_value = mock_input
+
+        import torch
+
+        mock_model = MagicMock()
+        mock_model.generate.return_value = torch.tensor([[1, 2, 3, 4]])
+        mock_tokenizer.decode.return_value = "output"
+
+        adapter._model = mock_model
+        adapter._tokenizer = mock_tokenizer
+
+        adapter.generate("p")
+
+        # Verify greedy decoding params
+        gen_kwargs = mock_model.generate.call_args[1]
+        assert gen_kwargs["do_sample"] is False
+        assert gen_kwargs["max_new_tokens"] == 64
+        assert gen_kwargs["eos_token_id"] == 10
+
+    def test_generate_many_sequential(self) -> None:
+        from canopy.llm import TransformersAdapter
+
+        adapter = TransformersAdapter(model_path="/fake", device="cpu")
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.encode.return_value = [10]
+        mock_input = MagicMock()
+        mock_input.input_ids = MagicMock(shape=[1, 3])
+        mock_input.to.return_value = mock_input
+        mock_tokenizer.return_value = mock_input
+
+        import torch
+
+        call_count = 0
+
+        def mock_generate(**kwargs: Any) -> torch.Tensor:
+            nonlocal call_count
+            call_count += 1
+            return torch.tensor([[1, 2, 3, 4]])
+
+        mock_model = MagicMock()
+        mock_model.generate = mock_generate
+        mock_tokenizer.decode.return_value = "out"
+
+        adapter._model = mock_model
+        adapter._tokenizer = mock_tokenizer
+
+        results = adapter.generate_many(["a", "b", "c"])
+        assert len(results) == 3
+        assert call_count == 3
+
+    def test_unload_frees_model(self) -> None:
+        from canopy.llm import TransformersAdapter
+
+        adapter = TransformersAdapter(model_path="/fake", device="cpu")
+        adapter._model = MagicMock()
+        adapter._tokenizer = MagicMock()
+
+        with (
+            patch("gc.collect"),
+            patch("torch.cuda.is_available", return_value=False),
+        ):
+            adapter.unload()
+
+        assert adapter._model is None
+        assert adapter._tokenizer is None
+
+
+# ---------------------------------------------------------------------------
+# DispatchAdapter
+# ---------------------------------------------------------------------------
+
+
+class TestDispatchAdapter:
+    """Tests for DispatchAdapter routing."""
+
+    def test_exact_match_routes_correctly(self) -> None:
+        from canopy.llm import DispatchAdapter
+
+        adapter_a = MagicMock()
+        adapter_a.generate.return_value = "from_a"
+        adapter_b = MagicMock()
+        adapter_b.generate.return_value = "from_b"
+
+        dispatch = DispatchAdapter(
+            adapters={"model-a": adapter_a, "model-b": adapter_b},
+        )
+
+        result = dispatch.generate("hello", model="model-a")
+        assert result == "from_a"
+        adapter_a.generate.assert_called_once()
+
+    def test_prefix_match(self) -> None:
+        from canopy.llm import DispatchAdapter
+
+        claude_adapter = MagicMock()
+        claude_adapter.generate.return_value = "claude_response"
+
+        dispatch = DispatchAdapter(
+            adapters={"claude-": claude_adapter},
+        )
+
+        result = dispatch.generate("hello", model="claude-sonnet-4-6")
+        assert result == "claude_response"
+
+    def test_default_fallback(self) -> None:
+        from canopy.llm import DispatchAdapter
+
+        default = MagicMock()
+        default.generate.return_value = "default_response"
+
+        dispatch = DispatchAdapter(adapters={}, default=default)
+
+        result = dispatch.generate("hello", model="unknown-model")
+        assert result == "default_response"
+
+    def test_none_model_uses_default(self) -> None:
+        from canopy.llm import DispatchAdapter
+
+        default = MagicMock()
+        default.generate.return_value = "default"
+
+        dispatch = DispatchAdapter(adapters={"x": MagicMock()}, default=default)
+
+        result = dispatch.generate("hello")
+        assert result == "default"
+
+    def test_generate_many_routes(self) -> None:
+        from canopy.llm import DispatchAdapter
+
+        adapter = MagicMock()
+        adapter.generate_many.return_value = ["a", "b"]
+
+        dispatch = DispatchAdapter(adapters={"local": adapter})
+
+        results = dispatch.generate_many(["p1", "p2"], model="local")
+        assert results == ["a", "b"]
+        adapter.generate_many.assert_called_once()

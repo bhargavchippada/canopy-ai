@@ -19,7 +19,6 @@ from typing import Any, Protocol
 DEFAULT_MODEL = "claude-haiku-4-5"
 HYPOTHESIS_MODEL = "claude-haiku-4-5"  # Fast + cheap for hypothesis gen
 EVAL_MODEL = "claude-sonnet-4-6"  # Higher quality for evaluation scoring
-EVAL_MODEL = "claude-sonnet-4-6"  # Quality model for evaluation
 
 log = logging.getLogger(__name__)
 
@@ -359,6 +358,144 @@ def batch_generate(
 # ---------------------------------------------------------------------------
 # Module-level convenience
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Transformers Adapter (local HuggingFace models — Llama, etc.)
+# ---------------------------------------------------------------------------
+
+
+class TransformersAdapter:
+    """Generate text using a local HuggingFace model (e.g. Llama-3.1-8B-Instruct).
+
+    Matches the paper's generate_llama() behavior:
+    - Appends "\\nAnswer:" to prompts
+    - Greedy decoding (do_sample=False)
+    - max_new_tokens=64
+    - Stops at newline
+    - Thread-safe via lock (GPU inference is sequential)
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        device: str = "cuda:0",
+        max_new_tokens: int = 64,
+    ) -> None:
+        import threading
+
+        self._model_path = model_path
+        self._device = device
+        self._max_new_tokens = max_new_tokens
+        self._model: Any = None
+        self._tokenizer: Any = None
+        self._lock = threading.Lock()
+
+    def _ensure_loaded(self) -> None:
+        """Lazy-load model on first use."""
+        if self._model is not None:
+            return
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        log.info("Loading local model: %s", self._model_path)
+        self._tokenizer = AutoTokenizer.from_pretrained(self._model_path)
+        self._model = AutoModelForCausalLM.from_pretrained(
+            self._model_path,
+            torch_dtype=torch.float16,
+        ).to(self._device)
+        log.info("Local model loaded on %s", self._device)
+
+    def generate(self, prompt: str, *, model: str | None = None) -> str:
+        """Generate text matching paper's generate_llama() behavior."""
+        import torch
+
+        self._ensure_loaded()
+        prompt_with_suffix = prompt + "\nAnswer:"
+        with self._lock:
+            inputs = self._tokenizer(prompt_with_suffix, return_tensors="pt").to(self._device)
+            with torch.no_grad():
+                newline_id = self._tokenizer.encode("\n")[-1]
+                output = self._model.generate(
+                    **inputs,
+                    max_new_tokens=self._max_new_tokens,
+                    do_sample=False,
+                    eos_token_id=newline_id,
+                )
+            text = self._tokenizer.decode(
+                output[0, inputs.input_ids.shape[1]:],
+                skip_special_tokens=True,
+            )
+        return text.strip().split("\n")[0].rstrip("assistant")
+
+    def generate_many(self, prompts: list[str], *, model: str | None = None) -> list[str]:
+        """Generate sequentially (GPU-bound, no parallelism benefit)."""
+        return [self.generate(p, model=model) for p in prompts]
+
+    def unload(self) -> None:
+        """Free VRAM by unloading model."""
+        import gc
+
+        import torch
+
+        if self._model is not None:
+            del self._model
+            del self._tokenizer
+            self._model = None
+            self._tokenizer = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            log.info("Local model unloaded")
+
+
+# ---------------------------------------------------------------------------
+# Dispatch Adapter (routes by model name)
+# ---------------------------------------------------------------------------
+
+
+class DispatchAdapter:
+    """Routes generate() calls to different adapters based on model name.
+
+    Allows using a local model (e.g. Llama) for RP generation while
+    keeping Claude for eval scoring, through a single interface.
+    """
+
+    def __init__(
+        self,
+        adapters: dict[str, LLMAdapter],
+        default: LLMAdapter | None = None,
+    ) -> None:
+        """Create a dispatch adapter.
+
+        Args:
+            adapters: Map of model name/prefix to adapter.
+                Exact match is checked first, then prefix match.
+            default: Fallback adapter when no match found.
+        """
+        self._adapters = adapters
+        self._default = default or ClaudeCodeAdapter()
+
+    def _resolve(self, model: str | None) -> tuple[LLMAdapter, str | None]:
+        """Find the right adapter for a model string."""
+        if model is None:
+            return self._default, None
+        # Exact match
+        if model in self._adapters:
+            return self._adapters[model], model
+        # Prefix match (e.g. "claude-" matches "claude-sonnet-4-6")
+        for prefix, adapter in self._adapters.items():
+            if model.startswith(prefix):
+                return adapter, model
+        return self._default, model
+
+    def generate(self, prompt: str, *, model: str | None = None) -> str:
+        adapter, resolved_model = self._resolve(model)
+        return adapter.generate(prompt, model=resolved_model)
+
+    def generate_many(self, prompts: list[str], *, model: str | None = None) -> list[str]:
+        adapter, resolved_model = self._resolve(model)
+        return adapter.generate_many(prompts, model=resolved_model)
+
 
 _default_adapter: LLMAdapter = ClaudeCodeAdapter()
 
