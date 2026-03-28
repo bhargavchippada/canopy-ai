@@ -380,30 +380,45 @@ class TransformersAdapter:
         model_path: str,
         device: str = "cuda:0",
         max_new_tokens: int = 64,
+        load_in_8bit: bool = False,
     ) -> None:
         import threading
 
         self._model_path = model_path
         self._device = device
         self._max_new_tokens = max_new_tokens
+        self._load_in_8bit = load_in_8bit
         self._model: Any = None
         self._tokenizer: Any = None
         self._lock = threading.Lock()
 
     def _ensure_loaded(self) -> None:
-        """Lazy-load model on first use."""
+        """Lazy-load model on first use. Thread-safe."""
         if self._model is not None:
             return
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        with self._lock:
+            if self._model is not None:  # double-check after acquiring lock
+                return
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        log.info("Loading local model: %s", self._model_path)
-        self._tokenizer = AutoTokenizer.from_pretrained(self._model_path)
-        self._model = AutoModelForCausalLM.from_pretrained(
-            self._model_path,
-            torch_dtype=torch.float16,
-        ).to(self._device)
-        log.info("Local model loaded on %s", self._device)
+            log.info("Loading local model: %s (8bit=%s)", self._model_path, self._load_in_8bit)
+            self._tokenizer = AutoTokenizer.from_pretrained(self._model_path)
+            if self._load_in_8bit:
+                from transformers import BitsAndBytesConfig
+
+                bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    self._model_path,
+                    quantization_config=bnb_config,
+                    device_map={"": self._device},
+                )
+            else:
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    self._model_path,
+                    torch_dtype=torch.float16,
+                ).to(self._device)
+            log.info("Local model loaded on %s", self._device)
 
     def generate(self, prompt: str, *, model: str | None = None) -> str:
         """Generate text matching paper's generate_llama() behavior."""

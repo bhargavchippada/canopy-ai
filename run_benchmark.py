@@ -171,6 +171,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
              "When set, --engine becomes a label and the local model is used for gen.",
     )
     parser.add_argument(
+        "--load_in_8bit",
+        action="store_true",
+        help="Load local generator model in 8-bit quantization (saves ~8GB VRAM).",
+    )
+    parser.add_argument(
         "--max_parallel",
         type=int,
         default=6,
@@ -497,6 +502,7 @@ def main() -> None:
         local_adapter = TransformersAdapter(
             model_path=args.generator_path,
             device=f"cuda:{args.device_id}",
+            load_in_8bit=args.load_in_8bit,
         )
         claude_adapter = ClaudeCodeAdapter()
         dispatch = DispatchAdapter(
