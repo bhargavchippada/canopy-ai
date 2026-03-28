@@ -124,7 +124,7 @@ def _run_embedding_subprocess(
     output_fd, output_path = tempfile.mkstemp(suffix=".npy", prefix="canopy_output_")
     os.close(output_fd)  # close immediately; subprocess writes to path
     try:
-        with open(input_fd, "w") as f:
+        with os.fdopen(input_fd, "w") as f:  # os.fdopen takes ownership of fd
             json.dump(texts, f)
 
         log.debug("Launching embed worker with executable: %s", sys.executable)

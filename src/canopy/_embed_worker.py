@@ -170,6 +170,9 @@ def main(argv: list[str] | None = None) -> None:
             batch_size=args.batch_size,
             character=args.character,
         )
+    else:
+        log.error("Unknown model_type: %s", args.model_type)
+        sys.exit(1)
 
     log.info("Saving embeddings with shape %s to %s", embeddings.shape, output_path)
     np.save(output_path, embeddings)
