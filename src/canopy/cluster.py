@@ -42,7 +42,9 @@ class KMeansCluster:
         self.seed = seed
 
     def fit_predict(self, embeddings: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        n_clusters = min(int(np.ceil(embeddings.shape[0] / self.n_in_cluster_case)), self.n_max_cluster)
+        if embeddings.shape[0] == 0:
+            return np.array([], dtype=np.intp), np.empty((0, embeddings.shape[1] if embeddings.ndim > 1 else 0))
+        n_clusters = max(1, min(int(np.ceil(embeddings.shape[0] / self.n_in_cluster_case)), self.n_max_cluster))
         kmeans = KMeans(n_clusters=n_clusters, random_state=self.seed)
         kmeans.fit(embeddings)
         return kmeans.labels_, kmeans.cluster_centers_
@@ -115,6 +117,9 @@ def select_representative_samples(
     Returns:
         List of clusters, each containing n_samples representative pairs.
     """
+    if len(pairs) != embeddings.shape[0]:
+        raise ValueError(f"pairs length ({len(pairs)}) must match embeddings rows ({embeddings.shape[0]})")
+
     clusters: list[list[dict[str, Any]]] = []
     for centroid in centroids:
         distances = np.sqrt(((embeddings - centroid) ** 2).sum(axis=-1))

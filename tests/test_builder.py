@@ -23,7 +23,7 @@ class TestBehavioralObservation:
         assert obs.scene == "at school"
         assert obs.action == "helps friend"
         assert obs.actor == "Alice"
-        assert obs.participants == []
+        assert obs.participants == ()
         assert obs.metadata == {}
 
     def test_with_participants(self) -> None:
@@ -31,7 +31,13 @@ class TestBehavioralObservation:
             scene="stage", action="sings", actor="Kasumi",
             participants=["Arisa", "Tae"],
         )
-        assert obs.participants == ["Arisa", "Tae"]
+        assert obs.participants == ("Arisa", "Tae")
+        assert isinstance(obs.participants, tuple)
+
+    def test_participants_immutable(self) -> None:
+        obs = BehavioralObservation(scene="s", action="a", actor="X", participants=["A"])
+        with pytest.raises(AttributeError):
+            obs.participants.append("B")  # type: ignore[union-attr]
 
     def test_with_metadata(self) -> None:
         obs = BehavioralObservation(
@@ -55,7 +61,7 @@ class TestBehavioralObservation:
         assert pair["scene"] == "at stage"
         assert pair["action"] == "plays guitar"
         assert pair["characters"] == ["Kasumi", "Arisa"]
-        assert pair["last_character"] == ["Arisa"]
+        assert pair["last_character"] == ("Arisa",)
         assert pair["title"] == "ep5"
 
     def test_to_pair_no_participants(self) -> None:

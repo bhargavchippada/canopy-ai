@@ -358,6 +358,70 @@ class TestAsyncGenerate:
 # ---------------------------------------------------------------------------
 
 
+class TestSessionGenerate:
+    """Test the reuse_session=True path."""
+
+    def test_session_generate_dispatches(self) -> None:
+        """When reuse_session=True, _session_generate is called instead of _async_generate."""
+        adapter = ClaudeCodeAdapter(default_model="m", timeout=5.0, max_retries=0, reuse_session=True)
+
+        with patch.object(adapter, "_session_generate", new_callable=AsyncMock) as mock_session:
+            mock_session.return_value = "session response"
+            result = adapter.generate("prompt")
+            assert result == "session response"
+            mock_session.assert_called_once_with("prompt", "m")
+
+    def test_session_generate_full_path(self) -> None:
+        """Test _session_generate with fully mocked SDK."""
+        adapter = ClaudeCodeAdapter(default_model="m", timeout=5.0, max_retries=0, reuse_session=True)
+
+        mock_sdk = MagicMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock
+        mock_sdk.TextBlock = MockTextBlock
+
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+
+        async def mock_send(prompt):
+            yield MockAssistantMessage(content=[MockTextBlock(text=f"session: {prompt}")])
+
+        mock_client.send_message = mock_send
+        mock_sdk.ClaudeSDKClient = MagicMock(return_value=mock_client)
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            result = asyncio.run(adapter._session_generate("hello", "m"))
+        assert "session: hello" in result
+
+    def test_session_reuses_client(self) -> None:
+        """Second call should reuse the existing client."""
+        adapter = ClaudeCodeAdapter(default_model="m", timeout=5.0, max_retries=0, reuse_session=True)
+
+        mock_sdk = MagicMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock
+        mock_sdk.TextBlock = MockTextBlock
+
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+
+        async def mock_send(prompt):
+            yield MockAssistantMessage(content=[MockTextBlock(text="ok")])
+
+        mock_client.send_message = mock_send
+        mock_sdk.ClaudeSDKClient = MagicMock(return_value=mock_client)
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            async def run_twice():
+                r1 = await adapter._session_generate("p1", "m")
+                r2 = await adapter._session_generate("p2", "m")
+                return r1, r2
+
+            r1, r2 = asyncio.run(run_twice())
+        assert r1 == "ok"
+        assert r2 == "ok"
+        # Client constructor should only be called once
+        assert mock_sdk.ClaudeSDKClient.call_count == 1
+
+
 class TestModuleFunctions:
     def test_set_adapter_and_generate(self) -> None:
         """Test that set_adapter swaps the module-level adapter."""

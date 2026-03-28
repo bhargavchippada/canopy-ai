@@ -33,15 +33,20 @@ class BehavioralObservation:
         scene: Context in which the behavior occurred (preceding actions, environment).
         action: The observed behavior/response.
         actor: Who performed the action.
-        participants: Other actors present during the observation.
+        participants: Other actors present during the observation (immutable tuple).
         metadata: Optional domain-specific metadata (title, source, timestamp, etc.).
     """
 
     scene: str
     action: str
     actor: str
-    participants: list[str] = field(default_factory=list)
+    participants: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Ensure participants is always a tuple (accept list at construction)
+        if isinstance(self.participants, list):
+            object.__setattr__(self, "participants", tuple(self.participants))
 
     def to_pair(self) -> dict[str, Any]:
         """Convert to the legacy dict format used by CDTNode internals.

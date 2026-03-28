@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 from canopy.cluster import (
     HDBSCANCluster,
@@ -57,6 +58,12 @@ class TestKMeansCluster:
         assert km.n_in_cluster_case == 16
         assert km.n_max_cluster == 8
         assert km.seed == 42
+
+    def test_empty_input(self) -> None:
+        km = KMeansCluster()
+        labels, centroids = km.fit_predict(np.empty((0, 4)))
+        assert labels.shape == (0,)
+        assert centroids.shape == (0, 4)
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +229,13 @@ class TestSelectRepresentativeSamples:
         )
         assert len(clusters) == 1
         assert len(clusters[0]) == 0
+
+    def test_length_mismatch_raises(self) -> None:
+        pairs = [{"id": i} for i in range(5)]
+        embeddings = np.eye(3)  # Only 3 rows
+        centroids = np.array([[1, 0, 0]])
+        with pytest.raises(ValueError, match="pairs length"):
+            select_representative_samples(pairs, embeddings, centroids)
 
     def test_multiple_centroids(self) -> None:
         pairs = [{"id": i} for i in range(20)]

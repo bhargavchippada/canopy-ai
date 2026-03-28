@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -179,6 +180,32 @@ class TestCDTNodeBuild:
         assert node.statements == []
         assert node.gates == []
 
+    def test_build_partially_correct_creates_recursive_child(self) -> None:
+        """When correctness is between reject and accept, recurse with filtered_pairs."""
+
+        def partial_validate(character: str, pairs: list, q: str | None, a: str, **kw: Any) -> tuple[dict, list]:
+            if q is None:
+                # Global check fails
+                return {"True": 5.0, "False": 90.0, "None": 3.0, "Irrelevant": 2.0}, pairs
+            # Gated: correctness between reject (0.5) and accept (0.8) → recurse
+            # broadness = 1 - 80/100 = 0.2, which is <= threshold_filter (0.8) ✓
+            # correctness = 60/(60+30) = 0.67, between reject (0.5) and accept (0.8) ✓
+            return {"True": 60.0, "False": 30.0, "None": 5.0, "Irrelevant": 80.0}, pairs[:3]
+
+        node = CDTNode(
+            "Alice", "identity", self._pairs(),
+            config=CDTConfig(max_depth=2),
+            _embedder=_mock_cluster_fn, _validator=partial_validate,
+            _hypothesis_fn=_mock_hypothesize, _summarize_fn=_mock_summarize,
+        )
+        # Should have created recursive children (not built_statements leaf)
+        assert len(node.gates) == 2
+        assert len(node.children) == 2
+        # Children should be recursive (pairs passed, not built_statements)
+        for child in node.children:
+            # Children have depth 2 and very few pairs (3), so they're empty leaves
+            assert child.statements == []
+
     def test_deps_forwarded_to_children(self) -> None:
         calls: list[str] = []
 
@@ -237,6 +264,27 @@ class TestCDTNodeTraversal:
         assert stats["total_statements"] == 3
         assert stats["total_gates"] == 2
         assert stats["max_depth"] == 2
+
+    def test_traverse_with_mocked_check_scene(self) -> None:
+        """Test traverse() with mocked NLI checker."""
+        root = self._make_tree()
+
+        # check_scene is imported inside traverse() via canopy.validation
+        with patch("canopy.validation.check_scene") as mock_cs:
+            mock_cs.side_effect = lambda texts, questions: [True] if "helping" in questions[0] else [False]
+            stmts = root.traverse("Alice is helping someone")
+
+        assert "Alice is kind" in stmts  # Root statement always included
+        assert "Alice helps others" in stmts  # First gate matched
+        assert "Alice studies hard" not in stmts  # Second gate didn't match
+
+    def test_traverse_no_gates(self) -> None:
+        """Traverse on a leaf node returns just its statements."""
+        leaf = CDTNode("A", "x", None, built_statements=["stmt1", "stmt2"])
+        # Leaf has no gates, so check_scene is never called
+        with patch("canopy.validation.check_scene"):
+            stmts = leaf.traverse("any scene")
+        assert stmts == ["stmt1", "stmt2"]
 
     def test_count_stats_3_levels(self) -> None:
         leaf = CDTNode("A", "x", None, built_statements=["deep"], depth=3)
