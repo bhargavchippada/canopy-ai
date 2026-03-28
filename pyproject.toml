@@ -71,6 +71,11 @@ select = ["E", "F", "I", "W"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: tests requiring real GPU models (skip with -m 'not integration')",
+    "gpu: tests requiring CUDA GPU",
+]
+addopts = "-m 'not integration'"
 
 [tool.mypy]
 python_version = "3.11"

@@ -4,18 +4,76 @@
 
 **Canopy** extends [Codified Decision Trees (CDT)](https://arxiv.org/abs/2601.10080) with temporal dynamics, structured gate predicates, and domain-agnostic behavioral profiling. Build evolving decision trees that learn how users behave, validated against real evidence, and traversable at inference time without LLM calls.
 
-## Planned Features
+## Installation
 
-- **Temporal CDT (T-CDT)** — Time-weighted validation where newer evidence takes precedence. Superseded patterns are preserved with history, not deleted.
-- **Semantic gate conditions** — Embedding-based cosine similarity for fast, deterministic traversal at inference time.
-- **Computed confidence** — Evidence-count based validation (supporting/contradicting/irrelevant), not LLM self-assessed scores.
-- **Claude integration** — Uses Anthropic Claude for hypothesis generation (OpenAI replaced in Phase 0).
-- **Domain-agnostic** — Works for user behavior profiling, character logic, workflow patterns, and more.
-- **Installable package** — `uv add canopy-ai`
+```bash
+# Clone and install
+git clone <repo-url> && cd canopy-ai
+uv sync
+
+# Download models (0.6B for quick testing)
+uv run python -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen3-Embedding-0.6B', local_dir='~/models/Qwen3-Embedding-0.6B')"
+uv run python -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen3-0.6B', local_dir='~/models/Qwen3-0.6B')"
+uv run python -c "from huggingface_hub import snapshot_download; snapshot_download('KomeijiForce/deberta-v3-base-rp-nli', local_dir='~/models/deberta-v3-base-rp-nli')"
+```
+
+Requires: Python 3.11+, CUDA GPU, Claude Max subscription (for hypothesis generation).
+
+## Quickstart
+
+```python
+from canopy import BehavioralObservation, CDTConfig, build_cdt
+from canopy.embeddings import init_models as init_embeddings
+from canopy.validation import init_models as init_validation
+from canopy.llm import ClaudeCodeAdapter, set_adapter
+from canopy.wikify import wikify_tree
+from pathlib import Path
+import torch
+
+# Setup
+device = torch.device("cuda:0")
+set_adapter(ClaudeCodeAdapter(default_model="claude-haiku-4-5"))
+init_embeddings(
+    str(Path.home() / "models/Qwen3-Embedding-0.6B"),
+    str(Path.home() / "models/Qwen3-0.6B"),
+    device,
+)
+init_validation(str(Path.home() / "models/deberta-v3-base-rp-nli"), device)
+
+# Create observations
+observations = [
+    BehavioralObservation(scene="...", action="...", actor="Alice", participants=["Bob"]),
+    # ... more observations
+]
+
+# Build and wikify
+tree = build_cdt(observations, character="Alice", topic="identity", config=CDTConfig(max_depth=2))
+print(wikify_tree(tree, title="Alice's identity"))
+```
+
+See `examples/quickstart.py` for a complete example.
+
+## Features
+
+- **Codified Decision Trees** — Hierarchical behavioral profiles with gated branches
+- **Claude integration** — Hypothesis generation via claude-agent-sdk (Max subscription)
+- **NLI validation** — DeBERTa-based natural language inference for hypothesis checking
+- **Domain-agnostic** — Works for character profiling, user behavior, workflow patterns
+- **Parallel hypothesis generation** — 8 clusters in ~3s via asyncio.gather
+- **Multiple clustering strategies** — KMeans (default) and HDBSCAN (density-based)
+- **Markdown wikification** — Convert CDT trees to readable profile documents
+
+## Testing
+
+```bash
+uv run python -m pytest                    # Unit tests (134 tests, ~10s)
+uv run python -m pytest -m integration     # Integration tests (11 tests, ~23s, needs GPU)
+uv run python -m pytest --cov=canopy       # With coverage report
+```
 
 ## Status
 
-**Phase 0: Baseline Reproduction** — Reproducing the original CDT paper's benchmarks before extending.
+**Phase 2: Core Library API** — Importable package with BehavioralObservation, builder, wikify, clustering.
 
 ## Attribution
 
