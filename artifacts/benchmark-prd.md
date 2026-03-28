@@ -155,10 +155,16 @@ Analysis of Kasumi.claude-haiku.depth3.relation.pkl (85 nodes, 194 stmts):
 ## Priority Fixes (before benchmark)
 
 1. Rebuild with paper's exact config: θ_accept=0.75, Qwen3-8B
-2. Add cross-topic deduplication pass after construction
-3. Prune depth-3 nodes with <2 statements
-4. Integrate batch_generate() for silent drop tracking
-5. Parallelize CDT construction (topics are independent)
+2. Embedding pre-processing refactor (E5 in canopy-design.md §16) — load each model once, not per topic
+3. Integrate batch_generate() for silent drop tracking
+4. Parallelize CDT construction with max_parallel=4 (LLM calls only after E5)
+
+## Deferred Enhancements (after baseline — see canopy-design.md §16)
+
+- E1: Hypothesis merge (cosine > 0.90 → LLM-combined statement)
+- E2: Depth-3 pruning (wait for paper-config results first)
+- E3: SOTA model exploration (one swap at a time, ablation style)
+- E4: Configurable topic discovery (essential for delulu integration)
 
 ## Resolved Questions
 

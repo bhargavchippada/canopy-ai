@@ -1230,4 +1230,55 @@ Currently no quality gate between CDT construction and output. A topic that prod
 
 ---
 
+## 16. Future Enhancements (Post-Baseline)
+
+Implement AFTER paper-exact baseline benchmark is established with Qwen3-8B + θ=0.75. One enhancement at a time, measure delta for each.
+
+### E1: Hypothesis Merge (extends D27)
+
+**Current**: Near-duplicate hypotheses across clusters are detected but one is simply dropped.
+**Enhancement**: Merge similar hypotheses (cosine > 0.90) via LLM into a single combined statement that preserves nuance from both sources. Add as `merge_similar_hypotheses` step between `_hypothesize` and `_summarize` in core.py.
+**Cost**: One LLM call per merged pair. Replaces two downstream validation calls with one — net neutral or cheaper.
+**Example**: "Kasumi encourages others during difficulties" + "Kasumi offers emotional support when bandmates struggle" → "Kasumi proactively offers encouragement and emotional support when those around her face difficulties"
+
+### E2: Depth-3 Pruning (extends D28)
+
+**Current**: Any hypothesis between threshold_reject and threshold_accept triggers recursion. With Haiku, this over-branches — 17/25 depth-3 nodes are empty.
+**Enhancement**: Wait for paper-config baseline first. If θ=0.75 + Qwen3-8B produces clean trees (~10 nodes avg like the paper), pruning is unnecessary. If still bloated, implement Option A (raise MIN_PAIRS_FOR_TREE at deeper levels) or Option C (confidence floor — only recurse if gated confidence > 0.60).
+**Note**: The paper uses depth 3 successfully — the issue is our model configuration, not depth 3 itself.
+
+### E3: SOTA Model Exploration
+
+**Current**: Paper models — Qwen3-Embedding-8B (surface), Qwen3-8B (generative), DeBERTa-v3-base (NLI), Haiku (hypothesis gen).
+**Enhancement**: After baseline, explore one model swap at a time:
+- **Embedding**: GTE-Qwen2, NV-Embed-v2, Jina v3 — may improve clustering quality
+- **NLI**: DeBERTa-v3-large, ModernBERT-based NLI — may improve validation accuracy
+- **Hypothesis gen**: Sonnet, Qwen3-8B-Instruct — may reduce verbosity/duplication
+**Approach**: Ablation style. Swap one model, keep rest constant, compare benchmark score.
+
+### E4: Configurable Topic Discovery
+
+**Current**: Topics are hardcoded as `ATTRIBUTE_TOPICS = ("identity", "personality", "ability", "relationship")` — designed for character RP profiling from the paper.
+**Enhancement**: Support two modes:
+- **Fixed topics** (current): Caller provides topic list. Good for known domains.
+- **Discovered topics**: Clustering step discovers topics organically from data — first cluster all observations, label clusters as topics, then build CDTs per discovered topic.
+**Motivation**: Essential for delulu integration where paper's character RP topics don't apply. Delulu needs workflow patterns, debugging approach, communication style, tool preferences, etc.
+
+### E5: Embedding Pre-Processing Refactor (IN PROGRESS)
+
+**Problem**: `select_cluster_centers()` loads/unloads 8B models per topic — 16 load cycles for 8 topics. PyTorch doesn't release VRAM on `del model`. OOM on 32GB GPU.
+**Solution**: Two-phase architecture:
+- **Phase A (Embedding)**: Load each model ONCE, encode ALL observations for ALL topics in one forward pass, save embeddings, unload. Use subprocess per model to guarantee VRAM release.
+- **Phase B (Tree Building)**: Use pre-computed embeddings for clustering + LLM calls. No model loading. `max_parallel=4` works (LLM calls only, no GPU).
+- **DeBERTa** (715MB) stays loaded in-process throughout — small enough.
+**Status**: PRD in progress (cody). Design decision: attribute topics share the same pairs, so surface/generative encoding happens once for the full dataset, not per topic.
+
+### E6: llama.cpp Model Serving (Future)
+
+**Enhancement**: Serve embedding models via llama.cpp server instead of PyTorch in-process. Separate process handles VRAM, pipeline calls HTTP endpoints.
+**Benefits**: Process isolation (no OOM cascade), better memory management (GGUF quantization), persistent loading (model stays up between runs), concurrent access.
+**Deferred**: E5 (subprocess approach) solves the immediate VRAM issue. llama.cpp is the long-term architecture if we need both models loaded simultaneously or want quantized inference.
+
+---
+
 *This document is the authoritative reference for CDT algorithm design in canopy-ai. For implementation details specific to a particular domain integration (e.g., delulu user profiling), refer to that project's own PRD.*
