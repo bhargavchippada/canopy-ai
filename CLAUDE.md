@@ -218,6 +218,18 @@ Three values disagree: θ_accept (0.75 vs 0.80), θ_f (0.75 vs 0.80), max_depth 
 
 **Score gap explanation:** Sonnet eval gives ~38-40% B (neutral); GPT-4.1 eval gives ~18% B. The 70.66→84.25 gap (13.6 pts) is eval model calibration only. CDT structure and implementation verified identical to paper.
 
+### PERSONAMEM Benchmark (Dynamic User Profiling)
+
+| Method | Accuracy | Notes |
+|--------|----------|-------|
+| **Sonnet + full context** | **76.9% (453/589)** | **32k split, proper end_index truncation** |
+| Paper frontier models (GPT-4.5, o1, Gemini) | ~50% | Direct prompting |
+| RAG | ~55% | Retrieval-augmented |
+| CDT alone | 20% (1/5) | CDT captures patterns, not specific facts |
+
+Per-type: suggest_new_ideas weakest (43%), all others 74-91%.
+Key insight: full conversation context + Sonnet is sufficient — CDT/RAG unnecessary for factual recall types.
+
 ### B-Score Analysis (artifacts/b-score-analysis.md)
 - 40% B rate: 77.6% different-facet (gen caricature), 19.4% format-mismatch, 3% wrong
 - 0% eval-too-strict — evaluator is correct
