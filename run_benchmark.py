@@ -108,7 +108,7 @@ def _save_benchmark_results(
     cdt_path: str | None,
     cdt_metadata: dict[str, Any] | None,
     score: float,
-    per_pair_results: list[int | None],
+    per_pair_results: list[Any],
     has_relationships: bool,
 ) -> None:
     """Save benchmark results as JSON with full provenance."""
@@ -134,7 +134,7 @@ def _save_benchmark_results(
             "mode": "gated",
             "relationships_included": has_relationships,
         },
-        "per_pair_scores": per_pair_results,
+        "per_pair_details": per_pair_results,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
 
@@ -154,7 +154,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--engine",
         type=str,
         default=HYPOTHESIS_MODEL,
-        help="Model for response generation (default: claude-haiku-4-5)",
+        help="Model for response generation (default: claude-haiku-4-5). Only used when --gen_mode=claude.",
     )
     parser.add_argument(
         "--eval_engine",
@@ -164,11 +164,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--gen_mode",
+        type=str,
+        choices=["claude", "llama"],
+        default="claude",
+        help="Generation mode: 'claude' (API via ClaudeCodeAdapter) or 'llama' (local Llama model). "
+             "Default: claude.",
+    )
+    parser.add_argument(
         "--generator_path",
         type=str,
-        default=None,
-        help="Path to local HF model for RP generation (e.g. ~/models/Llama-3.1-8B-Instruct). "
-             "When set, --engine becomes a label and the local model is used for gen.",
+        default="~/models/Llama-3.1-8B-Instruct",
+        help="Path to local HF model for RP generation (default: ~/models/Llama-3.1-8B-Instruct). "
+             "Used when --gen_mode=llama.",
     )
     parser.add_argument(
         "--load_in_8bit",
@@ -205,6 +213,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Run eval with both Haiku and Sonnet, output ensemble scores.",
+    )
+    parser.add_argument(
+        "--max_pairs",
+        type=int,
+        default=None,
+        help="Limit evaluation to first N test pairs (for quick testing).",
     )
 
     return parser
@@ -247,7 +261,7 @@ def evaluate(
 {scene}
 
 # Question
-{question} Answer a concise narration in one sentence."""
+{question} Answer in one short sentence of in-character dialogue."""
 
     if method == "vanilla":
         grounding = None
@@ -271,7 +285,7 @@ def evaluate(
     if grounding is not None:
         prompt = f"# Background Knowledge\n{grounding}\n\n{prompt}"
 
-    prediction = generate(prompt, model=engine)
+    prediction = generate(prompt, model=engine, max_tokens=100)
 
     score_instruction = f"""# Scene
 {scene}
@@ -344,7 +358,7 @@ def evaluate_multi(
 {scene}
 
 # Question
-{question} Answer a concise narration in one sentence."""
+{question} Answer in one short sentence of in-character dialogue."""
 
     if method == "cdt_package":
         grounding = _build_cdt_grounding(
@@ -358,7 +372,7 @@ def evaluate_multi(
         prompt = f"# Background Knowledge\n{grounding}\n\n{prompt}"
 
     # Generate prediction ONCE
-    prediction = generate(prompt, model=engine)
+    prediction = generate(prompt, model=engine, max_tokens=100)
 
     score_instruction = f"""# Scene
 {scene}
@@ -448,6 +462,7 @@ def benchmark(
     cdt_path: str | None = None,
     include_relationships: bool = True,
     multi_eval: bool = False,
+    max_pairs: int | None = None,
 ) -> list[int] | float:
     """Run the full benchmark for a character.
 
@@ -461,6 +476,7 @@ def benchmark(
         max_parallel: Max concurrent evaluate() calls (default 6).
         return_list: If True, return list of scores instead of mean.
         cdt_path: Path to CDT package pkl. Required when method is 'cdt_package'.
+        max_pairs: Limit to first N test pairs (for quick testing).
 
     Returns:
         Mean NLI score (float) or list of individual scores.
@@ -498,6 +514,12 @@ def benchmark(
                 "last_character": d["last_character"],
             }
         )
+
+    if max_pairs is not None:
+        if max_pairs <= 0:
+            raise ValueError(f"--max_pairs must be a positive integer, got {max_pairs}")
+        items = items[:max_pairs]
+        log.info("Limiting to first %d test pairs", len(items))
 
     total = len(items)
     bar = tqdm(total=total, desc="Score=N/A")
@@ -586,7 +608,11 @@ def benchmark(
         final_score = float(np.mean(scores))
 
     # Save benchmark results with provenance (rich per-pair data when available)
-    save_results: list[Any] = valid_results if not multi_eval else scores  # type: ignore[possibly-undefined]
+    save_results: list[Any]
+    if multi_eval:
+        save_results = scores
+    else:
+        save_results = valid_results  # type: ignore[possibly-undefined]
     try:
         _save_benchmark_results(
             character=character,
@@ -620,8 +646,11 @@ def main() -> None:
 
     args = build_arg_parser().parse_args()
 
-    # Set up adapter: DispatchAdapter when local generator is specified
-    if args.generator_path:
+    # Set up adapter based on gen_mode
+    gen_engine = args.engine
+    if args.gen_mode == "llama":
+        if args.engine != HYPOTHESIS_MODEL:
+            log.warning("--engine %s is ignored in llama mode; using 'llama-local'", args.engine)
         from canopy.llm import (
             ClaudeCodeAdapter,
             DispatchAdapter,
@@ -629,26 +658,28 @@ def main() -> None:
             set_adapter,
         )
 
+        resolved_gen_path = os.path.expanduser(args.generator_path)
         local_adapter = TransformersAdapter(
-            model_path=args.generator_path,
+            model_path=resolved_gen_path,
             device=f"cuda:{args.device_id}",
             load_in_8bit=args.load_in_8bit,
         )
         claude_adapter = ClaudeCodeAdapter()
+        gen_engine = "llama-local"
         dispatch = DispatchAdapter(
-            adapters={args.engine: local_adapter},
+            adapters={gen_engine: local_adapter},
             default=claude_adapter,
         )
         set_adapter(dispatch)
         log.info(
-            "Using local model %s for gen (%s), Claude for eval (%s)",
-            args.generator_path, args.engine, args.eval_engine,
+            "Using local Llama model %s for gen, Claude for eval (%s)",
+            resolved_gen_path, args.eval_engine,
         )
 
     result = benchmark(
         args.character,
         args.method,
-        engine=args.engine,
+        engine=gen_engine,
         eval_engine=args.eval_engine,
         discriminator_path=args.discriminator_path,
         device_id=args.device_id,
@@ -656,6 +687,7 @@ def main() -> None:
         cdt_path=args.cdt_path,
         include_relationships=not args.no_relationships,
         multi_eval=args.multi_eval,
+        max_pairs=args.max_pairs,
     )
     log.info("Final NLI Score: %.2f", result)
 

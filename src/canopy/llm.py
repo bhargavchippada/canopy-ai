@@ -30,8 +30,8 @@ log = logging.getLogger(__name__)
 class LLMAdapter(Protocol):
     """Abstract interface for LLM text generation."""
 
-    def generate(self, prompt: str, *, model: str | None = None) -> str: ...
-    def generate_many(self, prompts: list[str], *, model: str | None = None) -> list[str]: ...
+    def generate(self, prompt: str, *, model: str | None = None, max_tokens: int | None = None) -> str: ...
+    def generate_many(self, prompts: list[str], *, model: str | None = None, max_tokens: int | None = None) -> list[str]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -67,11 +67,11 @@ class ClaudeCodeAdapter:
         self._client: Any = None
         self._client_lock = asyncio.Lock() if reuse_session else None
 
-    def generate(self, prompt: str, *, model: str | None = None) -> str:
-        results = self.generate_many([prompt], model=model)
+    def generate(self, prompt: str, *, model: str | None = None, max_tokens: int | None = None) -> str:
+        results = self.generate_many([prompt], model=model, max_tokens=max_tokens)
         return results[0]
 
-    def generate_many(self, prompts: list[str], *, model: str | None = None) -> list[str]:
+    def generate_many(self, prompts: list[str], *, model: str | None = None, max_tokens: int | None = None) -> list[str]:
         target_model = model or self._default_model
 
         async def _run_all() -> list[str]:
@@ -79,20 +79,20 @@ class ClaudeCodeAdapter:
 
             async def _single(prompt: str) -> str:
                 async with sem:
-                    return await self._async_generate_with_retry(prompt, target_model)
+                    return await self._async_generate_with_retry(prompt, target_model, max_tokens=max_tokens)
 
             return await asyncio.gather(*[_single(p) for p in prompts])
 
         return asyncio.run(_run_all())
 
-    async def _async_generate_with_retry(self, prompt: str, model: str) -> str:
+    async def _async_generate_with_retry(self, prompt: str, model: str, *, max_tokens: int | None = None) -> str:
         """Generate with retry on transient failures."""
         last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
             try:
                 if self._reuse_session:
-                    return await self._session_generate(prompt, model)
-                return await self._async_generate(prompt, model)
+                    return await self._session_generate(prompt, model, max_tokens=max_tokens)
+                return await self._async_generate(prompt, model, max_tokens=max_tokens)
             except Exception as exc:
                 last_exc = exc
                 error_str = str(exc).lower()
@@ -111,7 +111,7 @@ class ClaudeCodeAdapter:
                 raise  # Non-transient error — don't retry
         raise last_exc  # type: ignore[misc]
 
-    async def _async_generate(self, prompt: str, model: str) -> str:
+    async def _async_generate(self, prompt: str, model: str, *, max_tokens: int | None = None) -> str:
         """Single LLM call via claude-agent-sdk query()."""
         from claude_agent_sdk import (
             AssistantMessage,
@@ -151,9 +151,17 @@ class ClaudeCodeAdapter:
                             parts.append(block.text)
 
         await asyncio.wait_for(_collect(), timeout=self._timeout)
-        return "".join(parts)
+        text = "".join(parts)
+        if max_tokens is not None:
+            # Approximate truncation: ~1 token ≈ 4 chars (may over-truncate CJK)
+            char_limit = max_tokens * 4
+            if len(text) > char_limit:
+                truncated = text[:char_limit]
+                last_period = truncated.rfind(".")
+                text = truncated[:last_period + 1] if last_period != -1 else truncated
+        return text
 
-    async def _session_generate(self, prompt: str, model: str) -> str:
+    async def _session_generate(self, prompt: str, model: str, *, max_tokens: int | None = None) -> str:
         """Generate using a persistent ClaudeSDKClient session (DISABLED by default).
 
         Saves ~750ms subprocess overhead per call by reusing a single process.
@@ -184,7 +192,14 @@ class ClaudeCodeAdapter:
             for block in getattr(message, "content", []):
                 if isinstance(block, TextBlock):
                     parts.append(block.text)
-        return "".join(parts)
+        text = "".join(parts)
+        if max_tokens is not None:
+            char_limit = max_tokens * 4
+            if len(text) > char_limit:
+                truncated = text[:char_limit]
+                last_period = truncated.rfind(".")
+                text = truncated[:last_period + 1] if last_period != -1 else truncated
+        return text
 
 
 # ---------------------------------------------------------------------------
@@ -420,19 +435,20 @@ class TransformersAdapter:
                 ).to(self._device)
             log.info("Local model loaded on %s", self._device)
 
-    def generate(self, prompt: str, *, model: str | None = None) -> str:
+    def generate(self, prompt: str, *, model: str | None = None, max_tokens: int | None = None) -> str:
         """Generate text matching paper's generate_llama() behavior."""
         import torch
 
         self._ensure_loaded()
         prompt_with_suffix = prompt + "\nAnswer:"
+        effective_max = max_tokens if max_tokens is not None else self._max_new_tokens
         with self._lock:
             inputs = self._tokenizer(prompt_with_suffix, return_tensors="pt").to(self._device)
             with torch.no_grad():
                 newline_id = self._tokenizer.encode("\n")[-1]
                 output = self._model.generate(
                     **inputs,
-                    max_new_tokens=self._max_new_tokens,
+                    max_new_tokens=effective_max,
                     do_sample=False,
                     eos_token_id=newline_id,
                 )
@@ -440,11 +456,11 @@ class TransformersAdapter:
                 output[0, inputs.input_ids.shape[1]:],
                 skip_special_tokens=True,
             )
-        return text.strip().split("\n")[0].rstrip("assistant")
+        return text.strip().split("\n")[0].removesuffix("assistant")
 
-    def generate_many(self, prompts: list[str], *, model: str | None = None) -> list[str]:
+    def generate_many(self, prompts: list[str], *, model: str | None = None, max_tokens: int | None = None) -> list[str]:
         """Generate sequentially (GPU-bound, no parallelism benefit)."""
-        return [self.generate(p, model=model) for p in prompts]
+        return [self.generate(p, model=model, max_tokens=max_tokens) for p in prompts]
 
     def unload(self) -> None:
         """Free VRAM by unloading model."""
@@ -503,13 +519,13 @@ class DispatchAdapter:
                 return adapter, model
         return self._default, model
 
-    def generate(self, prompt: str, *, model: str | None = None) -> str:
+    def generate(self, prompt: str, *, model: str | None = None, max_tokens: int | None = None) -> str:
         adapter, resolved_model = self._resolve(model)
-        return adapter.generate(prompt, model=resolved_model)
+        return adapter.generate(prompt, model=resolved_model, max_tokens=max_tokens)
 
-    def generate_many(self, prompts: list[str], *, model: str | None = None) -> list[str]:
+    def generate_many(self, prompts: list[str], *, model: str | None = None, max_tokens: int | None = None) -> list[str]:
         adapter, resolved_model = self._resolve(model)
-        return adapter.generate_many(prompts, model=resolved_model)
+        return adapter.generate_many(prompts, model=resolved_model, max_tokens=max_tokens)
 
 
 _default_adapter: LLMAdapter = ClaudeCodeAdapter()
@@ -521,11 +537,11 @@ def set_adapter(adapter: LLMAdapter) -> None:
     _default_adapter = adapter
 
 
-def generate(prompt: str, *, model: str | None = None) -> str:
+def generate(prompt: str, *, model: str | None = None, max_tokens: int | None = None) -> str:
     """Generate text using the current default adapter."""
-    return _default_adapter.generate(prompt, model=model)
+    return _default_adapter.generate(prompt, model=model, max_tokens=max_tokens)
 
 
-def generate_many(prompts: list[str], *, model: str | None = None) -> list[str]:
+def generate_many(prompts: list[str], *, model: str | None = None, max_tokens: int | None = None) -> list[str]:
     """Generate multiple texts in parallel using the current default adapter."""
-    return _default_adapter.generate_many(prompts, model=model)
+    return _default_adapter.generate_many(prompts, model=model, max_tokens=max_tokens)

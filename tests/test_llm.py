@@ -143,14 +143,14 @@ class TestClaudeCodeAdapter:
         adapter = self._make_adapter()
         result = adapter.generate("test prompt")
         assert result == "hello world"
-        mock_gen.assert_called_once_with("test prompt", "test-model")
+        mock_gen.assert_called_once_with("test prompt", "test-model", max_tokens=None)
 
     @patch("canopy.llm.ClaudeCodeAdapter._async_generate")
     def test_generate_uses_custom_model(self, mock_gen: AsyncMock) -> None:
         mock_gen.return_value = "response"
         adapter = self._make_adapter()
         adapter.generate("prompt", model="custom-model")
-        mock_gen.assert_called_once_with("prompt", "custom-model")
+        mock_gen.assert_called_once_with("prompt", "custom-model", max_tokens=None)
 
     @patch("canopy.llm.ClaudeCodeAdapter._async_generate")
     def test_generate_many_parallel(self, mock_gen: AsyncMock) -> None:
@@ -173,7 +173,7 @@ class TestClaudeCodeAdapter:
         call_count = 0
         max_concurrent_seen = 0
 
-        async def slow_gen(prompt: str, model: str) -> str:
+        async def slow_gen(prompt: str, model: str, *, max_tokens: int | None = None) -> str:
             nonlocal call_count, max_concurrent_seen
             call_count += 1
             current = call_count
@@ -357,6 +357,80 @@ class TestAsyncGenerate:
             result = asyncio.run(adapter._async_generate("test", "m"))
         assert result == ""
 
+    def test_async_generate_max_tokens_truncates_at_period(self) -> None:
+        """max_tokens truncates long responses at last sentence boundary."""
+        long_text = "First sentence here. Second sentence here. Third sentence is quite long."
+
+        async def long_gen(prompt: str, options: Any = None):
+            yield MockAssistantMessage(content=[MockTextBlock(text=long_text)])
+
+        mock_sdk = MagicMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock
+        mock_sdk.AssistantMessage = MockAssistantMessage
+        mock_sdk.TextBlock = MockTextBlock
+        mock_sdk.query = MagicMock(side_effect=long_gen)
+
+        adapter = ClaudeCodeAdapter(default_model="m", timeout=5.0, max_retries=0)
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            # max_tokens=10 → 40 char limit → "First sentence here. Second sentence he"
+            result = asyncio.run(adapter._async_generate("test", "m", max_tokens=10))
+        assert result == "First sentence here."
+
+    def test_async_generate_max_tokens_no_period_keeps_truncated(self) -> None:
+        """max_tokens with no period in truncated text keeps raw truncation."""
+        text = "No periods in this text at all"
+
+        async def gen(prompt: str, options: Any = None):
+            yield MockAssistantMessage(content=[MockTextBlock(text=text)])
+
+        mock_sdk = MagicMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock
+        mock_sdk.AssistantMessage = MockAssistantMessage
+        mock_sdk.TextBlock = MockTextBlock
+        mock_sdk.query = MagicMock(side_effect=gen)
+
+        adapter = ClaudeCodeAdapter(default_model="m", timeout=5.0, max_retries=0)
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            # max_tokens=5 → 20 char limit → "No periods in this t"
+            result = asyncio.run(adapter._async_generate("test", "m", max_tokens=5))
+        assert result == "No periods in this t"
+
+    def test_async_generate_max_tokens_none_is_noop(self) -> None:
+        """max_tokens=None does not truncate."""
+        text = "A" * 1000
+
+        async def gen(prompt: str, options: Any = None):
+            yield MockAssistantMessage(content=[MockTextBlock(text=text)])
+
+        mock_sdk = MagicMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock
+        mock_sdk.AssistantMessage = MockAssistantMessage
+        mock_sdk.TextBlock = MockTextBlock
+        mock_sdk.query = MagicMock(side_effect=gen)
+
+        adapter = ClaudeCodeAdapter(default_model="m", timeout=5.0, max_retries=0)
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            result = asyncio.run(adapter._async_generate("test", "m", max_tokens=None))
+        assert result == text
+
+    def test_async_generate_max_tokens_short_text_unchanged(self) -> None:
+        """Text shorter than max_tokens limit is returned unchanged."""
+        text = "Short."
+
+        async def gen(prompt: str, options: Any = None):
+            yield MockAssistantMessage(content=[MockTextBlock(text=text)])
+
+        mock_sdk = MagicMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock
+        mock_sdk.AssistantMessage = MockAssistantMessage
+        mock_sdk.TextBlock = MockTextBlock
+        mock_sdk.query = MagicMock(side_effect=gen)
+
+        adapter = ClaudeCodeAdapter(default_model="m", timeout=5.0, max_retries=0)
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            result = asyncio.run(adapter._async_generate("test", "m", max_tokens=100))
+        assert result == "Short."
+
 
 # ---------------------------------------------------------------------------
 # Module-level convenience functions
@@ -374,7 +448,7 @@ class TestSessionGenerate:
             mock_session.return_value = "session response"
             result = adapter.generate("prompt")
             assert result == "session response"
-            mock_session.assert_called_once_with("prompt", "m")
+            mock_session.assert_called_once_with("prompt", "m", max_tokens=None)
 
     def test_session_generate_full_path(self) -> None:
         """Test _session_generate with fully mocked SDK."""
@@ -459,7 +533,7 @@ class TestModuleFunctions:
         try:
             set_adapter(mock_adapter)
             generate("prompt", model="special-model")
-            mock_adapter.generate.assert_called_with("prompt", model="special-model")
+            mock_adapter.generate.assert_called_with("prompt", model="special-model", max_tokens=None)
         finally:
             set_adapter(original)
 
