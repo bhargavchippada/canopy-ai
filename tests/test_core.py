@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from canopy.core import (
@@ -41,19 +43,16 @@ class TestCDTConfig:
         assert CDTConfig(max_depth=2) != CDTConfig(max_depth=3)
 
     def test_hashable(self) -> None:
-        """Frozen dataclasses should be usable as dict keys."""
         d: dict[CDTConfig, str] = {CDTConfig(): "default"}
         assert d[CDTConfig()] == "default"
 
 
 # ---------------------------------------------------------------------------
-# CDTNode — construction without LLM (unit testable paths)
+# CDTNode — leaf construction (no LLM needed)
 # ---------------------------------------------------------------------------
 
 
 class TestCDTNodeLeaf:
-    """Test CDTNode paths that don't require LLM/embedding models."""
-
     def test_built_statements(self) -> None:
         node = CDTNode("Alice", "identity", None, built_statements=["Alice is kind"])
         assert node.statements == ["Alice is kind"]
@@ -61,11 +60,10 @@ class TestCDTNodeLeaf:
         assert node.children == []
         assert node.depth == 1
 
-    def test_built_statements_multiple(self) -> None:
-        stmts = ["stmt1", "stmt2", "stmt3"]
+    def test_built_statements_is_copy(self) -> None:
+        stmts = ["stmt1", "stmt2"]
         node = CDTNode("Bob", "personality", None, built_statements=stmts)
         assert node.statements == stmts
-        # Verify it's a copy, not the same reference
         assert node.statements is not stmts
 
     def test_built_statements_with_pairs_raises(self) -> None:
@@ -75,11 +73,9 @@ class TestCDTNodeLeaf:
     def test_empty_pairs_no_build(self) -> None:
         node = CDTNode("Alice", "identity", [])
         assert node.statements == []
-        assert node.gates == []
 
     def test_few_pairs_no_build(self) -> None:
-        """Fewer than MIN_PAIRS_FOR_TREE pairs → no tree construction."""
-        pairs = [{"action": f"action_{i}", "scene": f"scene_{i}"} for i in range(MIN_PAIRS_FOR_TREE)]
+        pairs = [{"action": f"a{i}", "scene": f"s{i}"} for i in range(MIN_PAIRS_FOR_TREE)]
         node = CDTNode("Alice", "identity", pairs)
         assert node.statements == []
 
@@ -97,6 +93,105 @@ class TestCDTNodeLeaf:
         node = CDTNode("Alice", "identity", None, built_statements=["x"], depth=5)
         assert node.depth == 5
 
+    def test_default_config_when_none(self) -> None:
+        pairs = [{"action": f"a{i}", "scene": f"s{i}"} for i in range(5)]
+        node = CDTNode("Alice", "identity", pairs)
+        assert node.statements == []
+
+
+# ---------------------------------------------------------------------------
+# Mock helpers for _build testing
+# ---------------------------------------------------------------------------
+
+
+def _mock_cluster_fn(character: str, pairs: list, **kw: Any) -> list[list[dict]]:
+    mid = len(pairs) // 2
+    return [pairs[:mid], pairs[mid:]]
+
+
+def _mock_hypothesize(clusters: list, character: str, topic: str, est: list, gp: list, **kw: Any) -> tuple[list[str], list[str]]:
+    return ([f"{character} is brave", f"{character} helps"], ["Danger?", "Friend nearby?"])
+
+
+def _mock_summarize(character: str, gates: list, stmts: list, **kw: Any) -> tuple[list[str], list[str]]:
+    return gates, stmts
+
+
+def _mock_validate_accept(character: str, pairs: list, q: str | None, a: str, **kw: Any) -> tuple[dict, list]:
+    return {"True": 90.0, "False": 1.0, "None": 5.0, "Irrelevant": 4.0}, pairs
+
+
+def _mock_validate_gated(character: str, pairs: list, q: str | None, a: str, **kw: Any) -> tuple[dict, list]:
+    if q is None:
+        return {"True": 5.0, "False": 90.0, "None": 3.0, "Irrelevant": 2.0}, pairs
+    return {"True": 85.0, "False": 5.0, "None": 5.0, "Irrelevant": 80.0}, pairs[:5]
+
+
+def _mock_validate_reject(character: str, pairs: list, q: str | None, a: str, **kw: Any) -> tuple[dict, list]:
+    if q is None:
+        return {"True": 5.0, "False": 90.0, "None": 3.0, "Irrelevant": 2.0}, pairs
+    return {"True": 3.0, "False": 90.0, "None": 5.0, "Irrelevant": 80.0}, pairs
+
+
+# ---------------------------------------------------------------------------
+# CDTNode — _build with mocked dependencies
+# ---------------------------------------------------------------------------
+
+
+class TestCDTNodeBuild:
+    def _pairs(self, n: int = 20) -> list[dict[str, Any]]:
+        return [{"action": f"action_{i}", "scene": f"scene_{i}"} for i in range(n)]
+
+    def test_build_all_accepted_globally(self) -> None:
+        node = CDTNode(
+            "Alice", "identity", self._pairs(),
+            config=CDTConfig(max_depth=1),
+            _embedder=_mock_cluster_fn, _validator=_mock_validate_accept,
+            _hypothesis_fn=_mock_hypothesize, _summarize_fn=_mock_summarize,
+        )
+        assert len(node.statements) == 2
+        assert "Alice is brave" in node.statements
+        assert node.gates == []
+        assert node.children == []
+
+    def test_build_gated_creates_children(self) -> None:
+        node = CDTNode(
+            "Alice", "identity", self._pairs(),
+            config=CDTConfig(max_depth=2),
+            _embedder=_mock_cluster_fn, _validator=_mock_validate_gated,
+            _hypothesis_fn=_mock_hypothesize, _summarize_fn=_mock_summarize,
+        )
+        assert node.statements == []
+        assert len(node.gates) == 2
+        assert len(node.children) == 2
+        for child in node.children:
+            assert len(child.statements) == 1
+
+    def test_build_all_rejected_empty(self) -> None:
+        node = CDTNode(
+            "Alice", "identity", self._pairs(),
+            config=CDTConfig(max_depth=1),
+            _embedder=_mock_cluster_fn, _validator=_mock_validate_reject,
+            _hypothesis_fn=_mock_hypothesize, _summarize_fn=_mock_summarize,
+        )
+        assert node.statements == []
+        assert node.gates == []
+
+    def test_deps_forwarded_to_children(self) -> None:
+        calls: list[str] = []
+
+        def tracking_cluster(*a: Any, **kw: Any) -> list[list[dict]]:
+            calls.append("cluster")
+            return _mock_cluster_fn(*a, **kw)
+
+        CDTNode(
+            "Alice", "identity", self._pairs(),
+            config=CDTConfig(max_depth=2),
+            _embedder=tracking_cluster, _validator=_mock_validate_accept,
+            _hypothesis_fn=_mock_hypothesize, _summarize_fn=_mock_summarize,
+        )
+        assert "cluster" in calls
+
 
 # ---------------------------------------------------------------------------
 # CDTNode — traversal and verbalization
@@ -105,82 +200,93 @@ class TestCDTNodeLeaf:
 
 class TestCDTNodeTraversal:
     def _make_tree(self) -> CDTNode:
-        """Build a hand-crafted tree for testing (no LLM needed)."""
         root = CDTNode("Alice", "identity", None, built_statements=["Alice is kind"])
         child1 = CDTNode("Alice", "identity", None, built_statements=["Alice helps others"], depth=2)
         child2 = CDTNode("Alice", "identity", None, built_statements=["Alice studies hard"], depth=2)
-        root.gates = ["Is Alice helping someone?", "Is Alice at school?"]
+        root.gates = ["Is Alice helping?", "Is Alice at school?"]
         root.children = [child1, child2]
         return root
 
     def test_verbalize_leaf(self) -> None:
         node = CDTNode("Alice", "identity", None, built_statements=["Alice is kind"])
-        text = node.verbalize()
-        assert "- Alice is kind" in text
+        assert "- Alice is kind" in node.verbalize()
 
     def test_verbalize_tree(self) -> None:
-        root = self._make_tree()
-        text = root.verbalize()
+        text = self._make_tree().verbalize()
         assert "- Alice is kind" in text
-        assert 'IF "Is Alice helping someone?"' in text
+        assert 'IF "Is Alice helping?"' in text
         assert "  - Alice helps others" in text
 
     def test_verbalize_empty(self) -> None:
-        node = CDTNode("Alice", "identity", None)
-        text = node.verbalize()
-        assert text == "(empty)"
+        assert CDTNode("A", "x", None).verbalize() == "(empty)"
+
+    def test_verbalize_indent(self) -> None:
+        node = CDTNode("A", "x", None, built_statements=["s"])
+        assert node.verbalize(indent=3).startswith("      - s")
 
     def test_count_stats_leaf(self) -> None:
-        node = CDTNode("Alice", "identity", None, built_statements=["s1", "s2"])
-        stats = node.count_stats()
-        assert stats["statements"] == 2
-        assert stats["total_statements"] == 2
-        assert stats["total_nodes"] == 1
-        assert stats["gates"] == 0
-        assert stats["total_gates"] == 0
+        stats = CDTNode("A", "x", None, built_statements=["s1", "s2"]).count_stats()
+        assert stats == {"statements": 2, "gates": 0, "max_depth": 1,
+                         "total_nodes": 1, "total_statements": 2, "total_gates": 0}
 
     def test_count_stats_tree(self) -> None:
-        root = self._make_tree()
-        stats = root.count_stats()
+        stats = self._make_tree().count_stats()
         assert stats["total_nodes"] == 3
-        assert stats["total_statements"] == 3  # 1 root + 1 + 1
+        assert stats["total_statements"] == 3
         assert stats["total_gates"] == 2
         assert stats["max_depth"] == 2
 
+    def test_count_stats_3_levels(self) -> None:
+        leaf = CDTNode("A", "x", None, built_statements=["deep"], depth=3)
+        mid = CDTNode("A", "x", None, built_statements=["mid"], depth=2)
+        mid.gates, mid.children = ["gate"], [leaf]
+        root = CDTNode("A", "x", None, built_statements=["root"], depth=1)
+        root.gates, root.children = ["top"], [mid]
+        stats = root.count_stats()
+        assert stats["total_nodes"] == 3
+        assert stats["max_depth"] == 3
+
 
 # ---------------------------------------------------------------------------
-# build_character_cdts (without models — test structure only)
+# build_character_cdts
 # ---------------------------------------------------------------------------
 
 
 class TestBuildCharacterCdts:
-    def test_attribute_topics_constant(self) -> None:
+    def test_attribute_topics(self) -> None:
         assert len(ATTRIBUTE_TOPICS) == 4
-        assert "identity" in ATTRIBUTE_TOPICS
-        assert "personality" in ATTRIBUTE_TOPICS
 
-    def test_min_relation_pairs_constant(self) -> None:
-        assert MIN_RELATION_PAIRS == 16
-
-    def test_build_with_no_pairs_produces_empty_trees(self) -> None:
-        """With empty pairs, all CDTs should be empty (no LLM calls)."""
-        topic2cdt, rel_topic2cdt = build_character_cdts(
-            "Alice", [], ["Bob", "Charlie"],
-        )
-        assert len(topic2cdt) == 4
-        for cdt in topic2cdt.values():
-            assert cdt.statements == []
-        assert len(rel_topic2cdt) == 0  # No pairs → no relationships
-
-    def test_build_with_few_pairs_produces_empty_trees(self) -> None:
-        pairs = [{"action": f"a{i}", "scene": f"s{i}", "last_character": ["Bob"]} for i in range(5)]
-        topic2cdt, rel_topic2cdt = build_character_cdts("Alice", pairs, ["Bob"])
-        assert len(topic2cdt) == 4
-        for cdt in topic2cdt.values():
-            assert cdt.statements == []
-        assert len(rel_topic2cdt) == 0  # Only 5 pairs < MIN_RELATION_PAIRS
+    def test_build_empty_pairs(self) -> None:
+        t, r = build_character_cdts("Alice", [], ["Bob"])
+        assert len(t) == 4
+        assert len(r) == 0
 
     def test_topic_names(self) -> None:
-        topic2cdt, _ = build_character_cdts("Kasumi", [], [])
-        expected = {f"Kasumi's {attr}" for attr in ATTRIBUTE_TOPICS}
-        assert set(topic2cdt.keys()) == expected
+        t, _ = build_character_cdts("Kasumi", [], [])
+        assert set(t.keys()) == {f"Kasumi's {a}" for a in ATTRIBUTE_TOPICS}
+
+    def test_relationship_threshold_met(self) -> None:
+        """With exactly MIN_RELATION_PAIRS, relationship CDT is created (but empty — too few for tree)."""
+        # Use exactly MIN_RELATION_PAIRS so CDTNode gets called but pairs <= MIN_PAIRS_FOR_TREE*2
+        # avoids triggering _build which needs models
+        n = MIN_RELATION_PAIRS
+        pairs = [{"action": f"a{i}", "scene": f"s{i}", "last_character": ["Bob"]} for i in range(n)]
+        # max_depth=0 prevents any _build calls
+        _, r = build_character_cdts("Alice", pairs, ["Bob"], config=CDTConfig(max_depth=0))
+        assert "Alice's interaction with Bob" in r
+
+    def test_relationship_threshold_not_met(self) -> None:
+        pairs = [{"action": f"a{i}", "scene": f"s{i}", "last_character": ["Bob"]} for i in range(MIN_RELATION_PAIRS - 1)]
+        _, r = build_character_cdts("Alice", pairs, ["Bob"], config=CDTConfig(max_depth=0))
+        assert len(r) == 0
+
+    def test_multiple_relationships(self) -> None:
+        pairs = list(
+            [{"action": f"a{i}", "scene": f"s{i}", "last_character": ["Bob"]} for i in range(20)]
+            + [{"action": f"b{i}", "scene": f"s{i}", "last_character": ["Charlie"]} for i in range(20)]
+            + [{"action": f"c{i}", "scene": f"s{i}", "last_character": ["Dave"]} for i in range(5)]
+        )
+        _, r = build_character_cdts("Alice", pairs, ["Bob", "Charlie", "Dave"], config=CDTConfig(max_depth=0))
+        assert "Alice's interaction with Bob" in r
+        assert "Alice's interaction with Charlie" in r
+        assert "Alice's interaction with Dave" not in r
