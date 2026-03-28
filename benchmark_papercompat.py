@@ -14,11 +14,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import pickle
 import re
-import sys
 from copy import deepcopy
 
 import torch
@@ -152,6 +150,7 @@ def main() -> None:
     parser.add_argument("--no_strict_parse", action="store_true")
     parser.add_argument("--strip_first_line", action="store_true")
     parser.add_argument("--max_pairs", type=int, default=None, help="Limit pairs for quick test")
+    parser.add_argument("--max_parallel", type=int, default=6, help="Max concurrent eval calls")
     args = parser.parse_args()
 
     strict = not args.no_strict_parse
@@ -191,34 +190,52 @@ def main() -> None:
             "last_character": d.get("last_character", []),
         })
 
-    print(f"Running {len(test_pairs)} pairs | engine={args.engine} eval={args.eval_engine}")
+    print(f"Running {len(test_pairs)} pairs | engine={args.engine} eval={args.eval_engine} "
+          f"max_parallel={args.max_parallel}")
     print(f"strict_parse={strict} strip_first_line={args.strip_first_line}")
 
-    scores = []
-    failures = 0
-    details = []
-    bar = tqdm(test_pairs)
-    for d in bar:
-        score, detail = evaluate(
-            CHARACTER, d, cdts,
-            engine=args.engine,
-            eval_engine=args.eval_engine,
-            strict_parse=strict,
-            strip_first_line=args.strip_first_line,
-        )
-        if score == -1:
-            failures += 1
-            details.append(detail)
-        else:
-            scores.append(score)
-            details.append(detail)
-        if scores:
-            bar.set_description(f"Score={sum(scores)/len(scores):.2f} (fail={failures})")
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    total = len(test_pairs)
+    results_list: list[tuple[int, dict] | None] = [None] * total
+    bar = tqdm(total=total, desc="Score=N/A")
+
+    with ThreadPoolExecutor(max_workers=args.max_parallel) as executor:
+        futures = {}
+        for i, d in enumerate(test_pairs):
+            future = executor.submit(
+                evaluate,
+                CHARACTER, d, cdts,
+                engine=args.engine,
+                eval_engine=args.eval_engine,
+                strict_parse=strict,
+                strip_first_line=args.strip_first_line,
+            )
+            futures[future] = i
+
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                results_list[idx] = future.result()
+            except Exception as exc:
+                log.error("evaluate() failed for pair #%d: %s", idx + 1, exc)
+            bar.update(1)
+            valid = [r for r in results_list if r is not None and r[0] != -1]
+            if valid:
+                mean = sum(r[0] for r in valid) / len(valid)
+                fails = sum(1 for r in results_list if r is not None and r[0] == -1)
+                bar.set_description(f"Score={mean:.2f} (fail={fails})")
+
+    bar.close()
+
+    scores = [r[0] for r in results_list if r is not None and r[0] != -1]
+    failures = sum(1 for r in results_list if r is not None and r[0] == -1)
+    details = [r[1] for r in results_list if r is not None]
 
     if scores:
         final = sum(scores) / len(scores)
         print(f"\nFinal NLI Score: {final:.2f}")
-        print(f"Pairs evaluated: {len(scores)}/{len(test_pairs)}")
+        print(f"Pairs evaluated: {len(scores)}/{total}")
         print(f"Parse failures: {failures}")
         print(f"Score distribution: A={sum(1 for d in details if d.get('score_letter')=='A')}, "
               f"B={sum(1 for d in details if d.get('score_letter')=='B')}, "
