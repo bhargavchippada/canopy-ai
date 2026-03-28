@@ -1158,4 +1158,74 @@ Traversal context includes session phase, interaction count, and recent interact
 
 ---
 
+## 15. CDT Quality Findings (2026-03-28)
+
+Empirical analysis of Kasumi CDT built with Claude Haiku, Qwen3-0.6B embeddings, depth=3, θ_accept=0.80.
+
+### Tree Statistics vs Paper
+
+| Metric | Our CDT | Paper Avg | Ratio |
+|--------|---------|-----------|-------|
+| Nodes | 85 | 10.4 | 8.2x |
+| Statements | 194 | 61 | 3.2x |
+| Empty leaves | 17/25 depth-3 | not reported | — |
+| Statement length | 168 chars avg | ~18 words | ~2x longer |
+
+### Issues Found
+
+1. **Cross-topic duplication**: identity/personality/relationship produce near-duplicate statements (9 pairs >0.55 similarity). No post-construction dedup pass exists.
+2. **Hollow depth 3**: 25 nodes, only 8 statements (0.3 stmts/node). Tree over-branches when evidence is thin.
+3. **Verbose statements**: 23% exceed 200 chars. Compound sentences that should be split.
+4. **Imbalanced relationships**: Arisa interaction has only 6 statements despite being the richest dynamic in source material.
+5. **Config mismatch with paper**: θ_accept=0.80 (paper: 0.75), Qwen3-0.6B (paper: 8B) — produces different tree shape.
+
+### Planned Fixes
+
+- **D27**: Cross-topic deduplication pass after tree construction (cosine similarity, merge threshold 0.55)
+- **D28**: Minimum evidence threshold for depth-3 recursion (don't branch with <MIN_PAIRS_FOR_TREE pairs)
+- **D29**: Statement compression pass (split compound sentences >200 chars)
+- **D30**: Paper-exact config as default for benchmark reproduction (θ_accept=0.75, Qwen3-8B)
+
+### Relationship CDTs for Delulu
+
+Relationship CDTs (character × character) don't apply to delulu user profiling. The equivalent is **context-filtered CDTs**:
+- Filter by project (Bhargav × delulu, Bhargav × canopy)
+- Filter by task type (brainstorming, debugging, reviewing)
+- Same algorithm: `CDTNode(character, goal_topic, filtered_pairs)` — just a different filter dimension
+
+This is deferred to delulu Phase 3 integration. For MVP, a single global CDT from all sessions is sufficient.
+
+---
+
+## CDT Quality Findings (2026-03-27)
+
+Observations from Kasumi Claude-built CDT (haiku, qwen06b, deberta, depth 3):
+
+### F1: Cross-topic statement duplication
+Identity/personality/relationship topics produce near-duplicate statements. The hypothesis generation prompt includes "other than established statements" but this only applies within a single topic's build — not across topics. Statements like "Kasumi values team cohesion" appear in identity, personality, AND relationship CDTs.
+
+**Fix:** Post-construction deduplication pass. After `build_character_cdts()` returns, compute pairwise similarity between all statements across topics. Merge or remove duplicates above a cosine threshold (~0.85). This is a new step, not a change to the tree algorithm.
+
+### F2: Over-branching at depth 3
+17/25 depth-3 nodes are empty (no statements, no gates). The tree recurses into thin evidence slices where there's nothing meaningful to discover. This wastes LLM calls and produces noise.
+
+**Fix:** Add a `min_evidence_ratio` check before recursing. If `len(filtered_pairs) / len(pairs) < threshold` (e.g., < 0.1), skip the subtree. The current `MIN_PAIRS_FOR_TREE = 8` filter catches absolute size but not relative thinness.
+
+### F3: Compound statement splitting
+Some generated statements exceed 200 characters and contain multiple claims joined by commas or "and". These are hard for the NLI validator to score accurately — one true clause and one false clause produces an ambiguous score.
+
+**Fix:** Post-generation splitting pass in `make_hypotheses_batch()`. Split compound statements (>200 chars with coordinating conjunctions) into individual claims. Validate each claim separately.
+
+### F4: Relationship CDT sparsity
+Kasumi×Arisa (the richest dynamic in the source material) produces only 6 total statements despite having enough pairs. Investigation needed: the clustering may be producing clusters too similar to the attribute topics, causing deduplication at the hypothesis level.
+
+**Fix:** Investigate whether the `gate_path` and `established_statements` parameters during relationship CDT construction are too aggressive in filtering. The relationship CDT should discover interaction-specific patterns, not just repeat attribute-level observations. Consider relationship-specific prompt tuning.
+
+### F5: Missing topic-level quality gates
+Currently no quality gate between CDT construction and output. A topic that produces 0 statements and 0 gates passes silently. There should be a minimum quality threshold: at least N statements per topic, otherwise log a warning or retry with different clustering.
+
+**Fix:** Add post-construction quality check in `build_character_cdts()`. Flag topics with `total_statements < 3` or `total_nodes == 1` (leaf-only tree).
+
+---
+
 *This document is the authoritative reference for CDT algorithm design in canopy-ai. For implementation details specific to a particular domain integration (e.g., delulu user profiling), refer to that project's own PRD.*
