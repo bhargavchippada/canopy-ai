@@ -8,10 +8,11 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 
 ## Current Phase
 
-**Phase 0: Baseline Reproduction** — Reproducing original CDT benchmarks with Claude (not GPT).
-- Phase 0A COMPLETE: Kasumi CDT smoke test passed (26 nodes, 72 statements, quality PASS)
-- Phase 0B: Running additional characters (Arisa with depth=3)
-**Next:** Phase 1 (full migration) — only after Phase 0 passes all success criteria.
+**Phase 0: COMPLETE** — 3 characters validated (Kasumi, Arisa, Yui).
+**Phase 1: Code Modernization** — Restructuring into `src/canopy/` package (IN PROGRESS).
+- Package modules: core.py, embeddings.py, validation.py, prompts.py, llm.py, data.py
+- CLI wrapper verified: Kasumi CDT runs with new structure
+**Next:** Phase 2 (Core Library API) — BehavioralObservation, HDBSCAN, semantic gates.
 
 ## Design Reference
 
@@ -98,22 +99,21 @@ Models stored in `~/models/`:
 
 ```
 canopy-ai/
-├── llm.py                     # LLM adapter interface (Protocol + ClaudeCodeAdapter)
-├── constant.py                # Env vars (gitignored)
-├── codified_decision_tree.py  # CDT construction (migrated to Claude)
-├── run_benchmark.py           # Benchmark runner (NOT YET MIGRATED — Phase 1)
-├── cdt_profiling.py           # Profiling/wikification (NOT YET MIGRATED — Phase 1)
-├── build_cdt.sh               # Shell wrapper for CDT construction
+├── src/canopy/                # Core package
+│   ├── __init__.py            # Exports: CDTConfig, CDTNode, build_character_cdts
+│   ├── core.py                # CDTNode, CDTConfig, build_character_cdts
+│   ├── embeddings.py          # Model loading, encoding, KMeans clustering
+│   ├── validation.py          # NLI-based scene/statement validation (DeBERTa)
+│   ├── prompts.py             # Hypothesis generation prompts + batch processing
+│   ├── llm.py                 # LLM adapter (Protocol + ClaudeCodeAdapter)
+│   ├── data.py                # HuggingFace dataset loading + caching
+│   └── cli.py                 # CLI placeholder
+├── codified_decision_tree.py  # Thin CLI wrapper (imports from canopy)
+├── verify_cdt.py              # CDT package inspector
+├── llm.py                     # Re-export shim (backwards compat)
+├── run_benchmark.py           # NOT YET MIGRATED — Phase 1
+├── cdt_profiling.py           # NOT YET MIGRATED — Phase 1
 ├── artifacts/                 # Design docs, results
-│   ├── canopy-design.md       # Authoritative CDT design (25 decisions)
-│   ├── initial-plan.md
-│   ├── phase0-phase1-prd.md
-│   ├── phase0-results.md      # Smoke test results
-│   └── llm-adapters.md
-├── data/                      # Cached HF datasets (gitignored)
-├── packages/                  # Output CDT packages (gitignored)
-├── profiles/                  # Wikified profiles (gitignored)
-├── src/canopy/                # Package source (Phase 2)
 ├── tests/                     # Test suite
 └── pyproject.toml
 ```
