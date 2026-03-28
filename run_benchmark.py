@@ -21,7 +21,7 @@ from tqdm.auto import tqdm
 
 from canopy.core import CDTNode
 from canopy.data import load_ar_pairs, load_character_metadata
-from canopy.llm import HYPOTHESIS_MODEL, extract_json, generate
+from canopy.llm import EVAL_MODEL, HYPOTHESIS_MODEL, extract_json, generate
 from canopy.validation import init_models as init_validation_models
 
 log = logging.getLogger(__name__)
@@ -158,8 +158,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--eval_engine",
         type=str,
-        default=HYPOTHESIS_MODEL,
-        help="Model for eval scoring (default: claude-haiku-4-5, same as gen for consistency)",
+        default=EVAL_MODEL,
+        help="Model for eval scoring (default: claude-sonnet-4-6)",
     )
 
     parser.add_argument(
@@ -203,7 +203,7 @@ def evaluate(
     cdts: dict[str, Any],
     *,
     engine: str = HYPOTHESIS_MODEL,
-    eval_engine: str = HYPOTHESIS_MODEL,
+    eval_engine: str = EVAL_MODEL,
     include_relationships: bool = True,
 ) -> int:
     """Evaluate a single scene-action pair.
@@ -335,7 +335,7 @@ def benchmark(
     method: str,
     *,
     engine: str = HYPOTHESIS_MODEL,
-    eval_engine: str = HYPOTHESIS_MODEL,
+    eval_engine: str = EVAL_MODEL,
     discriminator_path: str = "~/models/deberta-v3-base-rp-nli",
     device_id: int = 0,
     max_parallel: int = 6,

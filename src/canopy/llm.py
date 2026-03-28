@@ -18,6 +18,7 @@ from typing import Any, Protocol
 
 DEFAULT_MODEL = "claude-haiku-4-5"
 HYPOTHESIS_MODEL = "claude-haiku-4-5"  # Fast + cheap for hypothesis gen
+EVAL_MODEL = "claude-sonnet-4-6"  # Higher quality for evaluation scoring
 EVAL_MODEL = "claude-sonnet-4-6"  # Quality model for evaluation
 
 log = logging.getLogger(__name__)
