@@ -207,8 +207,10 @@ Rewriting is allowed and encouraged to increase:
 - Must be applicable to a **subset** of scenes (not a universal always-true condition)
 
 ### action_hypothesis
-- Must be a **single, concise sentence**
+- Must be a **single, concise sentence** of **at most 15 words**
 - Must be **non-assertive** (use "may", "tends to", "often appears to", "is described as", "is observed as", etc.)
+- Must be **specific enough to be FALSE in at least 30% of scenes** — avoid universal character descriptions that are always true
+- Must reference a **specific behavioral trigger or context**, not a general personality trait
 - Must not invent backstory or assume prior knowledge
 
 ## Output Format (JSON only)
