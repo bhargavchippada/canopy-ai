@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from canopy.llm import extract_json, generate, generate_many
+from canopy.llm import batch_generate, extract_json, generate
 
 log = logging.getLogger(__name__)
 
@@ -87,17 +87,29 @@ def make_hypotheses_batch(
         make_hypothesis_prompt(cluster, character, goal_topic, established_statements, gate_path, k)
         for cluster in clusters
     ]
-    responses = generate_many(prompts, model=model)
+    items = [(str(i), prompt) for i, prompt in enumerate(prompts)]
+    result = batch_generate(items, model=model)
+
     statement_candidates: list[str] = []
     gates: list[str] = []
-    for i, response in enumerate(responses):
-        try:
-            action_hyps, scene_hyps = parse_hypothesis_response(response)
-            statement_candidates.extend(action_hyps)
-            gates.extend(scene_hyps)
-        except (ValueError, KeyError) as exc:
-            log.warning("Cluster %d hypothesis parsing failed: %s", i, exc)
-            continue
+    for i in range(len(prompts)):
+        str_i = str(i)
+        if str_i in result.successes:
+            try:
+                action_hyps, scene_hyps = parse_hypothesis_response(result.successes[str_i])
+                statement_candidates.extend(action_hyps)
+                gates.extend(scene_hyps)
+            except (ValueError, KeyError) as exc:
+                log.warning("Cluster %s hypothesis parsing failed: %s", str_i, exc)
+
+    if not result.all_succeeded:
+        log.warning(
+            "batch_generate: %d/%d clusters dropped (success_rate=%.1f%%)",
+            len(result.exhausted_ids) + len(result.dropped_ids),
+            len(prompts),
+            result.success_rate * 100,
+        )
+
     return statement_candidates, gates
 
 
@@ -109,8 +121,7 @@ def summarize_triggers(
 ) -> tuple[list[str], list[str]]:
     """Summarize and compress hypothesis pairs into top 8 if needed."""
     paired_hypotheses = [
-        {"scene_check_hypothesis": gate, "action_hypothesis": stmt}
-        for gate, stmt in zip(gates, statement_candidates)
+        {"scene_check_hypothesis": gate, "action_hypothesis": stmt} for gate, stmt in zip(gates, statement_candidates)
     ]
 
     if len(paired_hypotheses) > 8:
