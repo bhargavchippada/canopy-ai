@@ -41,10 +41,15 @@ class EmbeddingCache:
     def __post_init__(self) -> None:
         # Copy arrays to avoid mutating caller's originals, then make read-only
         s = np.array(self.surface, copy=True)
+        g = np.array(self.generator, copy=True)
+        if s.ndim != 2 or g.ndim != 2:
+            raise ValueError("surface and generator must be 2-D arrays")
+        if len(s) != len(g):
+            raise ValueError(
+                f"surface rows ({len(s)}) != generator rows ({len(g)})"
+            )
         s.flags.writeable = False
         object.__setattr__(self, "surface", s)
-
-        g = np.array(self.generator, copy=True)
         g.flags.writeable = False
         object.__setattr__(self, "generator", g)
 

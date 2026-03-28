@@ -249,6 +249,17 @@ class TestEmbeddingCache:
         assert sub.surface.shape == (0, 3)
         assert sub.generator.shape == (0, 4)
 
+    def test_rejects_1d_arrays(self) -> None:
+        with pytest.raises(ValueError, match="2-D"):
+            EmbeddingCache(surface=np.array([1, 2, 3]), generator=np.array([4, 5, 6]))
+
+    def test_rejects_row_mismatch(self) -> None:
+        with pytest.raises(ValueError, match="rows"):
+            EmbeddingCache(
+                surface=np.random.randn(3, 4).astype(np.float32),
+                generator=np.random.randn(5, 6).astype(np.float32),
+            )
+
     def test_subset_with_numpy_indices(self) -> None:
         cache = self._make_cache(10, 3, 4)
         indices = np.array([1, 3, 5])
