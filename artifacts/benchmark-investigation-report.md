@@ -157,11 +157,15 @@ Root cause: Claude models produce universally-true hypotheses (~25 words) that p
 
 ### Prompt Fix Results (Sonnet gen + Sonnet eval, no relationships)
 
-| Character | Paper CDT | Our CDT (prompt fix) | Improvement |
-|-----------|----------|---------------------|-------------|
-| Kasumi | 66.17 | **70.66** | +4.49 |
-| Arisa | 63.36 | **68.10** | +4.74 |
-| Haruhi | TBD | TBD | TBD |
+| Character | Dataset | Paper CDT | Our CDT (prompt fix) | Improvement | B% |
+|-----------|---------|----------|---------------------|-------------|-----|
+| Kasumi | Bandori | 66.17 | **70.66** | +4.49 | 38.3 |
+| Arisa | Bandori | 63.36 | **68.10** | +4.74 | 41.4 |
+| Haruhi | Fandom | — | **55.41** | — | 60.8 |
+
+Paper reference scores (GPT-4.1 eval): PoPiPa CDT 84.25, Fandom CDT 60.82.
+Haruhi's 60.8% B-rate reflects Fandom difficulty (less predictable character behavior).
+53 nodes/48 gates may over-gate, reducing grounding per scene.
 
 ### Earlier Cross-Character Pattern (pre-fix)
 
