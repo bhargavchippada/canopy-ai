@@ -60,8 +60,12 @@ See `examples/quickstart.py` for a complete example.
 - **NLI validation** — DeBERTa-based natural language inference for hypothesis checking
 - **Domain-agnostic** — Works for character profiling, user behavior, workflow patterns
 - **Parallel hypothesis generation** — 8 clusters in ~3s via asyncio.gather
+- **Resilient batch generation** — `batch_generate()` with retry and drop tracking
+- **Parallel benchmarking** — ThreadPoolExecutor with configurable `--max_parallel`
 - **Multiple clustering strategies** — KMeans (default) and HDBSCAN (density-based)
 - **Markdown wikification** — Convert CDT trees to readable profile documents
+- **CDT artifact provenance** — Descriptive filenames + embedded metadata in pickles
+- **Benchmark result tracking** — JSON results saved with full provenance in `results/`
 
 ## API Reference
 
@@ -103,18 +107,20 @@ See `examples/quickstart.py` for a complete example.
 | `set_adapter(adapter)` | `canopy.llm` | Swap default LLM adapter |
 | `generate(prompt, model)` | `canopy.llm` | Single LLM call |
 | `generate_many(prompts, model)` | `canopy.llm` | Parallel LLM calls |
+| `batch_generate(items, model, max_attempts)` | `canopy.llm` | Resilient batch with retry/drop tracking |
+| `BatchResult` | `canopy.llm` | Frozen result: successes, dropped_ids, exhausted_ids |
 
 ## Testing
 
 ```bash
-uv run python -m pytest                    # Unit tests (138 tests, ~10s)
+uv run python -m pytest                    # Unit tests (156 tests, ~10s)
 uv run python -m pytest -m integration     # Integration tests (11 tests, ~23s, needs GPU)
 uv run python -m pytest --cov=canopy       # Coverage report
 ```
 
 ## Status
 
-**Phase 3: COMPLETE** — Full library API with 149 tests, 97% combined coverage.
+**Phase 4: COMPLETE** — All legacy files migrated, batch LLM, parallel benchmark, 167 tests.
 
 ## Attribution
 
@@ -148,73 +154,43 @@ This repo includes:
 ## How to use?
 - **Initialization**
 
-You have to create a `constant.py` file at the root path, and put your openai and huggingface token there:
-```python
-openai_key = "..."
-hf_token = "..."
-```
-You may also follow the configuration below:
-```
-torch: 2.7.1+cu126
-transformers: 4.55.0
-sentence_transformers: 5.1.0
-sklearn: 1.7.1
-openai: 2.14.0
-```
+**Note:** The original setup required `constant.py` with OpenAI keys. Canopy has fully migrated to Claude via `claude-agent-sdk` — no `constant.py` or OpenAI dependency needed.
+
 - **Construct CDTs**
 
-For characters involved in the paper's experiments, you can use the `build_cdt.sh` script to reproduce the CDTs:
-```sh
-python codified_decision_tree.py \
-  --character "Kasumi" \
-  --engine "gpt-4.1" \
-  --max_depth 3 \
-  --threshold_accept 0.8 \
-  --threshold_reject 0.5 \
-  --threshold_filter 0.8 \
-  --device_id 1
+```bash
+uv run python codified_decision_tree.py \
+  --character Kasumi \
+  --engine claude-haiku-4-5 \
+  --surface_embedder_path ~/models/Qwen3-Embedding-0.6B \
+  --generator_embedder_path ~/models/Qwen3-0.6B \
+  --discriminator_path ~/models/deberta-v3-base-rp-nli \
+  --cluster_method kmeans \
+  --device_id 0
 ```
 
-You can build CDT for any character using the `CDT_Node` class given in `codified_decision_tree.py`:
-```python
-CDT_Node(character, goal_topic, pairs, built_statements, depth, established_statements, gate_path,
-max_depth, threshold_accept, threshold_reject, threshold_filter)
-```
-
-Parameters:
-- `character`: The name for your character;
-- `goal_topic`: The goal (topic/aspect) you want the CDT to focus on;
-- `pairs`: The training data for your CDT, in the format: `[{"scene": "...", "action": "..."}, {"scene": "...", "action": "..."}, ...]` where `character` takes the `action` in the `scene`;
-- `built_statements`: Used for node growth, keep it `None`;
-- `depth`: Used for depth-based termination, keep it `1`;
-- `established_statements`: Used for diversification, keep `[]`;
-- `gate_path`: Used for diversification, keep `[]`;
-- `max_depth`: Used for depth-based termination, recommended to be set to `3`;
-- `threshold_accept`: The parameter controlling the precision for statement acceptance;
-- `threshold_reject`: The parameter controlling the precision for hypothesis abolishment;
-- `threshold_filter`: The parameter controlling the filtering effect for gate acceptance;
-- `device_id`: The GPU id you want to run the algorithm on.
-
-- **Grounding**
-
-With a constructed `CDT_Node` (e.g., `cdt_tree`), use `cdt_tree.traverse(scene)` to fetch grounding statements on the CDT for the input `scene`.
+Output: `packages/Kasumi.haiku.qwen06b.deberta.kmeans.d3.a80.r50.relation.pkl`
 
 - **Benchmark CDTs**
-The benchmarking is run by `run_benchmark.sh` on the two benchmarks: [Fine-grained Fandom Benchmark](https://huggingface.co/datasets/KomeijiForce/Fine_Grained_Fandom_Benchmark_Action_Sequences) and [Bandori Conversational Benchmark](https://huggingface.co/datasets/KomeijiForce/Bandori_Conversational_Benchmark_Action_Sequences).
 
-```python
-python run_benchmark.py \
-  --character "Kasumi" \
-  --method "cdt_package" \
-  --engine "gpt-4.1" \
-  --eval_engine "gpt-4.1" \
-  --generator_path "meta-llama/Llama-3.1-8B-Instruct" \
-  --device_id 1
+Benchmarks run against: [Fine-grained Fandom Benchmark](https://huggingface.co/datasets/KomeijiForce/Fine_Grained_Fandom_Benchmark_Action_Sequences) and [Bandori Conversational Benchmark](https://huggingface.co/datasets/KomeijiForce/Bandori_Conversational_Benchmark_Action_Sequences).
+
+```bash
+uv run python run_benchmark.py \
+  --character Kasumi \
+  --method cdt_package \
+  --cdt_path packages/Kasumi.haiku.qwen06b.deberta.kmeans.d3.a80.r50.relation.pkl \
+  --engine claude-haiku-4-5 \
+  --eval_engine claude-sonnet-4-6 \
+  --max_parallel 6 \
+  --device_id 0
 ```
+
+Results saved as JSON in `results/` with full provenance.
 
 - **Wikification**
 
-The example notebook to wikify CDTs into reader-friendly profiles is provided in `Wikification.ipynb`.
+Use `canopy.wikify` module or see `examples/quickstart.py`.
 
 ## Benchmark Results
 
