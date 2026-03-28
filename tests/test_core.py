@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -111,7 +111,12 @@ def _mock_cluster_fn(character: str, pairs: list, **kw: Any) -> list[list[dict]]
 
 
 def _mock_hypothesize(
-    clusters: list, character: str, topic: str, est: list, gp: list, **kw: Any,
+    clusters: list,
+    character: str,
+    topic: str,
+    est: list,
+    gp: list,
+    **kw: Any,
 ) -> tuple[list[str], list[str]]:
     return ([f"{character} is brave", f"{character} helps"], ["Danger?", "Friend nearby?"])
 
@@ -147,10 +152,14 @@ class TestCDTNodeBuild:
 
     def test_build_all_accepted_globally(self) -> None:
         node = CDTNode(
-            "Alice", "identity", self._pairs(),
+            "Alice",
+            "identity",
+            self._pairs(),
             config=CDTConfig(max_depth=1),
-            _embedder=_mock_cluster_fn, _validator=_mock_validate_accept,
-            _hypothesis_fn=_mock_hypothesize, _summarize_fn=_mock_summarize,
+            _embedder=_mock_cluster_fn,
+            _validator=_mock_validate_accept,
+            _hypothesis_fn=_mock_hypothesize,
+            _summarize_fn=_mock_summarize,
         )
         assert len(node.statements) == 2
         assert "Alice is brave" in node.statements
@@ -159,10 +168,14 @@ class TestCDTNodeBuild:
 
     def test_build_gated_creates_children(self) -> None:
         node = CDTNode(
-            "Alice", "identity", self._pairs(),
+            "Alice",
+            "identity",
+            self._pairs(),
             config=CDTConfig(max_depth=2),
-            _embedder=_mock_cluster_fn, _validator=_mock_validate_gated,
-            _hypothesis_fn=_mock_hypothesize, _summarize_fn=_mock_summarize,
+            _embedder=_mock_cluster_fn,
+            _validator=_mock_validate_gated,
+            _hypothesis_fn=_mock_hypothesize,
+            _summarize_fn=_mock_summarize,
         )
         assert node.statements == []
         assert len(node.gates) == 2
@@ -172,10 +185,14 @@ class TestCDTNodeBuild:
 
     def test_build_all_rejected_empty(self) -> None:
         node = CDTNode(
-            "Alice", "identity", self._pairs(),
+            "Alice",
+            "identity",
+            self._pairs(),
             config=CDTConfig(max_depth=1),
-            _embedder=_mock_cluster_fn, _validator=_mock_validate_reject,
-            _hypothesis_fn=_mock_hypothesize, _summarize_fn=_mock_summarize,
+            _embedder=_mock_cluster_fn,
+            _validator=_mock_validate_reject,
+            _hypothesis_fn=_mock_hypothesize,
+            _summarize_fn=_mock_summarize,
         )
         assert node.statements == []
         assert node.gates == []
@@ -193,10 +210,14 @@ class TestCDTNodeBuild:
             return {"True": 60.0, "False": 30.0, "None": 5.0, "Irrelevant": 80.0}, pairs[:3]
 
         node = CDTNode(
-            "Alice", "identity", self._pairs(),
+            "Alice",
+            "identity",
+            self._pairs(),
             config=CDTConfig(max_depth=2),
-            _embedder=_mock_cluster_fn, _validator=partial_validate,
-            _hypothesis_fn=_mock_hypothesize, _summarize_fn=_mock_summarize,
+            _embedder=_mock_cluster_fn,
+            _validator=partial_validate,
+            _hypothesis_fn=_mock_hypothesize,
+            _summarize_fn=_mock_summarize,
         )
         # Should have created recursive children (not built_statements leaf)
         assert len(node.gates) == 2
@@ -214,10 +235,14 @@ class TestCDTNodeBuild:
             return _mock_cluster_fn(*a, **kw)
 
         CDTNode(
-            "Alice", "identity", self._pairs(),
+            "Alice",
+            "identity",
+            self._pairs(),
             config=CDTConfig(max_depth=2),
-            _embedder=tracking_cluster, _validator=_mock_validate_accept,
-            _hypothesis_fn=_mock_hypothesize, _summarize_fn=_mock_summarize,
+            _embedder=tracking_cluster,
+            _validator=_mock_validate_accept,
+            _hypothesis_fn=_mock_hypothesize,
+            _summarize_fn=_mock_summarize,
         )
         assert "cluster" in calls
 
@@ -255,8 +280,14 @@ class TestCDTNodeTraversal:
 
     def test_count_stats_leaf(self) -> None:
         stats = CDTNode("A", "x", None, built_statements=["s1", "s2"]).count_stats()
-        assert stats == {"statements": 2, "gates": 0, "max_depth": 1,
-                         "total_nodes": 1, "total_statements": 2, "total_gates": 0}
+        assert stats == {
+            "statements": 2,
+            "gates": 0,
+            "max_depth": 1,
+            "total_nodes": 1,
+            "total_statements": 2,
+            "total_gates": 0,
+        }
 
     def test_count_stats_tree(self) -> None:
         stats = self._make_tree().count_stats()
@@ -341,3 +372,53 @@ class TestBuildCharacterCdts:
         assert "Alice's interaction with Bob" in r
         assert "Alice's interaction with Charlie" in r
         assert "Alice's interaction with Dave" not in r
+
+    def test_build_character_cdts_parallel(self) -> None:
+        """Verify parallel construction populates both attr and rel dicts."""
+        pairs = [{"action": f"a{i}", "scene": f"s{i}", "last_character": ["Bob"]} for i in range(20)]
+        cfg = CDTConfig(max_depth=0)
+        t, r = build_character_cdts("Alice", pairs, ["Bob"], config=cfg, max_parallel=2)
+        assert len(t) == 4
+        assert set(t.keys()) == {f"Alice's {a}" for a in ATTRIBUTE_TOPICS}
+        assert "Alice's interaction with Bob" in r
+
+    def test_build_character_cdts_max_parallel(self) -> None:
+        """Verify ThreadPoolExecutor is called with the specified max_parallel value."""
+        with patch("canopy.core.ThreadPoolExecutor") as mock_pool_cls:
+            mock_pool = MagicMock()
+            mock_pool.__enter__ = MagicMock(return_value=mock_pool)
+            mock_pool.__exit__ = MagicMock(return_value=False)
+            # Make submit return futures that resolve to CDTNode-like objects
+            mock_future = MagicMock()
+            mock_future.result.return_value = CDTNode("Alice", "x", None)
+            mock_pool.submit.return_value = mock_future
+            mock_pool_cls.return_value = mock_pool
+
+            # Patch as_completed to return futures in order
+            with patch("canopy.core.as_completed") as mock_as_completed:
+                # Each submit call creates one future; we need them all returned
+                def side_effect_as_completed(futures_dict: dict) -> list:
+                    return list(futures_dict.keys())
+
+                mock_as_completed.side_effect = side_effect_as_completed
+
+                build_character_cdts("Alice", [], [], config=CDTConfig(), max_parallel=7)
+
+            mock_pool_cls.assert_called_once_with(max_workers=7)
+
+    def test_build_character_cdts_handles_failure(self) -> None:
+        """A failing CDT build logs an exception but doesn't crash the batch."""
+        call_count = 0
+
+        def _failing_cdtnode(*args: Any, **kwargs: Any) -> CDTNode:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("GPU OOM")
+            return CDTNode.__new__(CDTNode)
+
+        with patch("canopy.core.CDTNode", side_effect=_failing_cdtnode):
+            # Should not raise — the failed topic is skipped
+            t, r = build_character_cdts("Alice", [], [], config=CDTConfig())
+        # 4 attribute topics, 1 fails → 3 succeed
+        assert len(t) == 3

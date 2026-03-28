@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -83,9 +84,16 @@ class CDTNode:
             pass
         else:
             self._build(
-                character, goal_topic, pairs,
-                established_statements, gate_path, cfg,
-                _embedder, _validator, _hypothesis_fn, _summarize_fn,
+                character,
+                goal_topic,
+                pairs,
+                established_statements,
+                gate_path,
+                cfg,
+                _embedder,
+                _validator,
+                _hypothesis_fn,
+                _summarize_fn,
             )
 
     def _build(
@@ -112,13 +120,20 @@ class CDTNode:
         _summarize = summarize_fn or summarize_triggers
 
         clusters = _select_clusters(
-            character, pairs,
-            n_in_cluster_case=16, n_in_cluster_sample=8, n_max_cluster=8, bs=8,
+            character,
+            pairs,
+            n_in_cluster_case=16,
+            n_in_cluster_sample=8,
+            n_max_cluster=8,
+            bs=8,
         )
         log.info("Making hypotheses for %d clusters in parallel...", len(clusters))
         statement_candidates, gates = _hypothesize(
-            clusters, character, goal_topic,
-            established_statements + self.statements, gate_path,
+            clusters,
+            character,
+            goal_topic,
+            established_statements + self.statements,
+            gate_path,
         )
 
         gates, statement_candidates = _summarize(character, gates, statement_candidates)
@@ -146,31 +161,39 @@ class CDTNode:
                     continue
                 elif correctness >= cfg.threshold_accept:
                     self.gates.append(gate)
-                    self.children.append(CDTNode(
-                        character, goal_topic, None,
-                        built_statements=[stmt],
-                        depth=self.depth + 1,
-                        established_statements=established_statements + self.statements,
-                        gate_path=gate_path + [gate],
-                        config=cfg,
-                        _embedder=_select_clusters,
-                        _validator=_validate,
-                        _hypothesis_fn=_hypothesize,
-                        _summarize_fn=_summarize,
-                    ))
+                    self.children.append(
+                        CDTNode(
+                            character,
+                            goal_topic,
+                            None,
+                            built_statements=[stmt],
+                            depth=self.depth + 1,
+                            established_statements=established_statements + self.statements,
+                            gate_path=gate_path + [gate],
+                            config=cfg,
+                            _embedder=_select_clusters,
+                            _validator=_validate,
+                            _hypothesis_fn=_hypothesize,
+                            _summarize_fn=_summarize,
+                        )
+                    )
                 else:
                     self.gates.append(gate)
-                    self.children.append(CDTNode(
-                        character, goal_topic, filtered_pairs,
-                        depth=self.depth + 1,
-                        established_statements=established_statements + self.statements,
-                        gate_path=gate_path + [gate],
-                        config=cfg,
-                        _embedder=_select_clusters,
-                        _validator=_validate,
-                        _hypothesis_fn=_hypothesize,
-                        _summarize_fn=_summarize,
-                    ))
+                    self.children.append(
+                        CDTNode(
+                            character,
+                            goal_topic,
+                            filtered_pairs,
+                            depth=self.depth + 1,
+                            established_statements=established_statements + self.statements,
+                            gate_path=gate_path + [gate],
+                            config=cfg,
+                            _embedder=_select_clusters,
+                            _validator=_validate,
+                            _hypothesis_fn=_hypothesize,
+                            _summarize_fn=_summarize,
+                        )
+                    )
 
     def traverse(self, scene: str) -> list[str]:
         """Traverse the tree and collect applicable statements for a scene.
@@ -238,34 +261,67 @@ def build_character_cdts(
     pairs: list[dict[str, Any]],
     other_characters: list[str],
     config: CDTConfig | None = None,
+    *,
+    max_parallel: int = 4,
 ) -> tuple[dict[str, CDTNode], dict[str, CDTNode]]:
     """Build attribute and relationship CDTs for a character.
+
+    Topics are built concurrently using a thread pool. Each topic's CDT
+    construction is independent (no shared mutable state), so parallelism
+    is safe. Set ``max_parallel`` conservatively when using large models
+    to avoid GPU OOM (e.g. ``max_parallel=1`` for 8B-parameter models).
 
     Args:
         character: Character name (e.g. "Kasumi").
         pairs: Training scene-action pairs.
         other_characters: Other characters for relationship CDTs.
         config: CDT construction config. Uses defaults if None.
+        max_parallel: Maximum concurrent CDT builds. Default 4.
 
     Returns:
         (topic2cdt, rel_topic2cdt) — attribute and relationship CDT dicts.
     """
     cfg = config or CDTConfig()
 
-    topic2cdt: dict[str, CDTNode] = {}
+    # Collect all tasks: (kind, goal_topic, topic_pairs)
+    tasks: list[tuple[str, str, list[dict[str, Any]]]] = []
+
     for attribute in ATTRIBUTE_TOPICS:
         goal_topic = f"{character}'s {attribute}"
-        log.info("Building CDT: %s", goal_topic)
-        topic2cdt[goal_topic] = CDTNode(character, goal_topic, pairs, config=cfg)
+        tasks.append(("attr", goal_topic, pairs))
 
-    rel_topic2cdt: dict[str, CDTNode] = {}
     for other in other_characters:
         goal_topic = f"{character}'s interaction with {other}"
         relation_pairs = [d for d in pairs if other in d["last_character"]]
         if len(relation_pairs) >= MIN_RELATION_PAIRS:
-            log.info("Building CDT: %s (%d pairs)", goal_topic, len(relation_pairs))
-            rel_topic2cdt[goal_topic] = CDTNode(
-                character, goal_topic, relation_pairs, config=cfg,
+            tasks.append(("rel", goal_topic, relation_pairs))
+
+    topic2cdt: dict[str, CDTNode] = {}
+    rel_topic2cdt: dict[str, CDTNode] = {}
+
+    with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+        futures = {}
+        for kind, goal_topic, topic_pairs in tasks:
+            log.info("Building CDT: %s (%d pairs)", goal_topic, len(topic_pairs))
+            future = executor.submit(
+                CDTNode,
+                character,
+                goal_topic,
+                topic_pairs,
+                config=cfg,
             )
+            futures[future] = (kind, goal_topic)
+
+        for future in as_completed(futures):
+            kind, goal_topic = futures[future]
+            try:
+                node = future.result()
+                if kind == "attr":
+                    topic2cdt[goal_topic] = node
+                else:
+                    rel_topic2cdt[goal_topic] = node
+                log.info("Completed CDT: %s", goal_topic)
+            except Exception:
+                log.exception("Failed to build CDT: %s", goal_topic)
 
     return topic2cdt, rel_topic2cdt
