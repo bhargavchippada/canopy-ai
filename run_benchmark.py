@@ -215,6 +215,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Run eval with both Haiku and Sonnet, output ensemble scores.",
     )
     parser.add_argument(
+        "--narration",
+        action="store_true",
+        default=False,
+        help="Use paper's original narration prompt instead of dialogue prompt.",
+    )
+    parser.add_argument(
         "--max_pairs",
         type=int,
         default=None,
@@ -238,6 +244,7 @@ def evaluate(
     engine: str = HYPOTHESIS_MODEL,
     eval_engine: str = EVAL_MODEL,
     include_relationships: bool = True,
+    narration: bool = False,
 ) -> dict[str, Any]:
     """Evaluate a single scene-action pair.
 
@@ -257,11 +264,15 @@ def evaluate(
     action = d["action"]
     last_character = d["last_character"]
 
+    prompt_suffix = (
+        "Answer a concise narration in one sentence." if narration
+        else "Answer in one short sentence of in-character dialogue."
+    )
     prompt = f"""# Scene
 {scene}
 
 # Question
-{question} Answer in one short sentence of in-character dialogue."""
+{question} {prompt_suffix}"""
 
     if method == "vanilla":
         grounding = None
@@ -340,6 +351,7 @@ def evaluate_multi(
     engine: str = HYPOTHESIS_MODEL,
     eval_engines: list[str] | None = None,
     include_relationships: bool = True,
+    narration: bool = False,
 ) -> dict[str, Any]:
     """Evaluate with multiple eval models, returning per-model and ensemble scores.
 
@@ -354,11 +366,15 @@ def evaluate_multi(
     action = d["action"]
     last_character = d["last_character"]
 
+    prompt_suffix = (
+        "Answer a concise narration in one sentence." if narration
+        else "Answer in one short sentence of in-character dialogue."
+    )
     prompt = f"""# Scene
 {scene}
 
 # Question
-{question} Answer in one short sentence of in-character dialogue."""
+{question} {prompt_suffix}"""
 
     if method == "cdt_package":
         grounding = _build_cdt_grounding(
@@ -463,6 +479,7 @@ def benchmark(
     include_relationships: bool = True,
     multi_eval: bool = False,
     max_pairs: int | None = None,
+    narration: bool = False,
 ) -> list[int] | float:
     """Run the full benchmark for a character.
 
@@ -524,6 +541,9 @@ def benchmark(
     total = len(items)
     bar = tqdm(total=total, desc="Score=N/A")
 
+    multi_results: list[dict[str, Any] | None] = []
+    valid_results: list[dict[str, Any]] = []
+
     if multi_eval:
         eval_engines = [HYPOTHESIS_MODEL, EVAL_MODEL]
         log.info("Multi-eval mode: evaluating with %s", eval_engines)
@@ -537,6 +557,7 @@ def benchmark(
                     character, item, method, cdts,
                     engine=engine, eval_engines=eval_engines,
                     include_relationships=include_relationships,
+                    narration=narration,
                 )
                 futures[future] = i
 
@@ -568,7 +589,7 @@ def benchmark(
         log.info("  Ensemble min (conservative): %.2f", float(np.mean([r["ensemble_min"] for r in valid])))
         log.info("  Ensemble max (optimistic): %.2f", float(np.mean([r["ensemble_max"] for r in valid])))
 
-        scores = [int(r["ensemble_mean"]) for r in valid]
+        scores = [r["ensemble_mean"] for r in valid]
     else:
         eval_results: list[dict[str, Any] | None] = [None] * total
 
@@ -580,6 +601,7 @@ def benchmark(
                     character, item, method, cdts,
                     engine=engine, eval_engine=eval_engine,
                     include_relationships=include_relationships,
+                    narration=narration,
                 )
                 futures[future] = i
 
@@ -610,9 +632,9 @@ def benchmark(
     # Save benchmark results with provenance (rich per-pair data when available)
     save_results: list[Any]
     if multi_eval:
-        save_results = scores
+        save_results = multi_results  # preserves None slots for n_failed
     else:
-        save_results = valid_results  # type: ignore[possibly-undefined]
+        save_results = valid_results
     try:
         _save_benchmark_results(
             character=character,
@@ -688,6 +710,7 @@ def main() -> None:
         include_relationships=not args.no_relationships,
         multi_eval=args.multi_eval,
         max_pairs=args.max_pairs,
+        narration=args.narration,
     )
     log.info("Final NLI Score: %.2f", result)
 

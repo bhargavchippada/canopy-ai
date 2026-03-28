@@ -28,10 +28,34 @@ log = logging.getLogger(__name__)
 
 
 class LLMAdapter(Protocol):
-    """Abstract interface for LLM text generation."""
+    """Abstract interface for LLM text generation.
+
+    Note on ``max_tokens``: This is a **post-generation length budget**, not an
+    API parameter.  The model generates unconstrained and the result is trimmed
+    to approximately ``max_tokens * 4`` characters at the nearest sentence
+    boundary.  Not suitable for structured outputs (JSON, code blocks, etc.).
+    """
 
     def generate(self, prompt: str, *, model: str | None = None, max_tokens: int | None = None) -> str: ...
     def generate_many(self, prompts: list[str], *, model: str | None = None, max_tokens: int | None = None) -> list[str]: ...
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def _apply_token_budget(text: str, max_tokens: int) -> str:
+    """Trim *text* to approximately *max_tokens* at the nearest sentence boundary.
+
+    Uses a rough 1 token ≈ 4 characters heuristic.  May over-truncate CJK text.
+    """
+    char_limit = max_tokens * 4
+    if len(text) <= char_limit:
+        return text
+    truncated = text[:char_limit]
+    last_period = truncated.rfind(".")
+    return truncated[: last_period + 1] if last_period != -1 else truncated
 
 
 # ---------------------------------------------------------------------------
@@ -153,12 +177,7 @@ class ClaudeCodeAdapter:
         await asyncio.wait_for(_collect(), timeout=self._timeout)
         text = "".join(parts)
         if max_tokens is not None:
-            # Approximate truncation: ~1 token ≈ 4 chars (may over-truncate CJK)
-            char_limit = max_tokens * 4
-            if len(text) > char_limit:
-                truncated = text[:char_limit]
-                last_period = truncated.rfind(".")
-                text = truncated[:last_period + 1] if last_period != -1 else truncated
+            text = _apply_token_budget(text, max_tokens)
         return text
 
     async def _session_generate(self, prompt: str, model: str, *, max_tokens: int | None = None) -> str:
@@ -194,11 +213,7 @@ class ClaudeCodeAdapter:
                     parts.append(block.text)
         text = "".join(parts)
         if max_tokens is not None:
-            char_limit = max_tokens * 4
-            if len(text) > char_limit:
-                truncated = text[:char_limit]
-                last_period = truncated.rfind(".")
-                text = truncated[:last_period + 1] if last_period != -1 else truncated
+            text = _apply_token_budget(text, max_tokens)
         return text
 
 
