@@ -102,7 +102,9 @@ def main() -> None:
     )
 
     # Build CDTs
-    topic2cdt, rel_topic2cdt = build_character_cdts(args.character, pairs, other_characters, config)
+    topic2cdt, rel_topic2cdt = build_character_cdts(
+        args.character, pairs, other_characters, config, max_parallel=4,
+    )
 
     # Compute stats
     total_nodes = 0

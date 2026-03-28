@@ -262,12 +262,13 @@ def build_character_cdts(
     other_characters: list[str],
     config: CDTConfig | None = None,
     *,
-    max_parallel: int = 1,
+    max_parallel: int = 4,
 ) -> tuple[dict[str, CDTNode], dict[str, CDTNode]]:
     """Build attribute and relationship CDTs for a character.
 
-    Topics are built concurrently using a thread pool. Default ``max_parallel=1``
-    is safe for all models. Values >1 parallelize LLM calls but GPU inference
+    Topics are built concurrently using a thread pool. Default ``max_parallel=4``
+    overlaps LLM API round-trips across topics. GPU inference is serialized
+    via threading.Lock in embeddings.py and validation.py. Values >1 parallelize LLM calls but GPU inference
     is serialized via locks in ``canopy.embeddings`` and ``canopy.validation``.
 
     Args:
