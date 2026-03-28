@@ -214,6 +214,8 @@ class TestValidateHypothesis:
             assert "Irrelevant" not in result_counts
             # check_statement_probs called once for the batch
             mock_stmt.assert_called_once()
+            # Verify shape contract: probs are accumulated into result_counts
+            assert stmt_probs.shape == (3,)  # [false, none, true] — matches impl
         finally:
             val._classifier = saved_clf
             val._classifier_tokenizer = saved_tok
@@ -302,12 +304,15 @@ class TestValidateHypothesis:
 
             # 5 pairs with bs=2 => 3 scene batches (2, 2, 1)
             assert len(scene_calls) == 3
-            assert len(scene_calls[0]) == 2
-            assert len(scene_calls[1]) == 2
-            assert len(scene_calls[2]) == 1
+            assert scene_calls[0] == ["s0", "s1"]
+            assert scene_calls[1] == ["s2", "s3"]
+            assert scene_calls[2] == ["s4"]
 
             # All 5 pairs pass => 3 statement batches (2, 2, 1)
             assert len(stmt_calls) == 3
+            assert stmt_calls[0] == ["a0", "a1"]
+            assert stmt_calls[1] == ["a2", "a3"]
+            assert stmt_calls[2] == ["a4"]
 
             # All pairs kept
             assert len(filtered) == 5

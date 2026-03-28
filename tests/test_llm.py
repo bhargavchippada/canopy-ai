@@ -701,6 +701,8 @@ class TestBatchGenerate:
         assert result.successes == {}
         assert result.exhausted_ids == frozenset({"a", "b"})
         assert result.all_succeeded is False
+        # 3 rounds of failures before exhaustion
+        assert adapter.generate_many.call_count == 3
 
     def test_exception_exhausts_then_breaks(self) -> None:
         """When exception exhausts all pending items, loop breaks immediately."""
