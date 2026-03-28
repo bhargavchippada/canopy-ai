@@ -134,17 +134,38 @@ Neither is objectively wrong — they represent different calibrations of the sa
 
 ## 5. CDT Quality Comparison
 
-| CDT | Attr Nodes | Attr Stmts | Rel Nodes | Rel Stmts | Total |
-|-----|-----------|-----------|----------|----------|-------|
-| GPT-4.1 (paper) | 20 | ~60 | 9 | ~23 | 29/~83 |
-| Sonnet (ours, 8B) | 6 | 32 | 24 | 56 | 30/88 |
-| Haiku (ours, 0.6B) | 9 | 45 | 11 | 27 | 20/72 |
+### Before Prompt Fix (flat trees, 9 gates)
 
-Our CDT has comparable node/statement counts. The benchmark proves quality parity: our CDT scores 67.96 vs paper CDT 66.17 with identical eval (Sonnet).
+| CDT | Nodes | Stmts | Gates | Attr Depth | NLI |
+|-----|-------|-------|-------|-----------|-----|
+| GPT-4.1 (paper) | 29 | 103 | 21 | 3,2,3,2 | 70.96* |
+| Sonnet pre-fix (8B) | 17 | 66 | 9 | 0,0,0,0 | 67.96 |
+| Haiku pre-fix (8B) | 17 | 71 | 9 | 0,0,2,0 | 65.87 |
 
-## 6. Cross-Character Validation (Arisa)
+*Paper code with Sonnet eval
 
-The same pattern holds for Arisa:
+### After Prompt Fix (deep trees, 22 gates)
+
+| CDT | Nodes | Stmts | Gates | Attr Depth | NLI |
+|-----|-------|-------|-------|-----------|-----|
+| GPT-4.1 (paper) | 29 | 103 | 21 | 3,2,3,2 | 70.96* |
+| **Sonnet post-fix (8B)** | **30** | **113** | **22** | **3,2,1,1** | **70.66** |
+
+Root cause: Claude models produce universally-true hypotheses (~25 words) that pass NLI globally → flat trees. Fix: 15-word max + falsifiability constraint → gated trees matching paper structure.
+
+## 6. Cross-Character Validation
+
+### Prompt Fix Results (Sonnet gen + Sonnet eval, no relationships)
+
+| Character | Paper CDT | Our CDT (prompt fix) | Improvement |
+|-----------|----------|---------------------|-------------|
+| Kasumi | 66.17 | **70.66** | +4.49 |
+| Arisa | 63.36 | **68.10** | +4.74 |
+| Haruhi | TBD | TBD | TBD |
+
+### Earlier Cross-Character Pattern (pre-fix)
+
+The eval model pattern holds across characters:
 - Sonnet gen beats Llama gen by ~9 points (same as Kasumi)
 - B-rate: Llama 48%, Sonnet 37% (same pattern)
 - C-rate: ~18-22% (consistent across both models)
