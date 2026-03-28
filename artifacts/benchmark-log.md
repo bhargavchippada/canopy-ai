@@ -29,6 +29,7 @@
 | 6 | Sonnet CDT, Haiku gen+Sonnet eval | Haiku | Sonnet | Qwen3-8B | Qwen3-8B | DeBERTa | kmeans | 3 | 0.75 | 0.50 | 8 | 30 | 88 | 167 | 58.98 | 2026-03-28 | Kasumi.sonnet.qwen8b.deberta.kmeans.d3.a75.r50.relation.pkl | Sonnet CDT +0.6 vs Haiku CDT. |
 | 7 | Sonnet CDT, Sonnet gen+eval | Sonnet | Sonnet | Qwen3-8B | Qwen3-8B | DeBERTa | kmeans | 3 | 0.75 | 0.50 | 8 | 30 | 88 | 167 | **66.17** | 2026-03-28 | Kasumi.sonnet.qwen8b.deberta.kmeans.d3.a75.r50.relation.pkl | +7.8 vs Haiku eval! Eval model is dominant factor. |
 | 8 | GPT-4.1 CDT, Sonnet gen+eval | Sonnet | Sonnet | (paper CDT) | (paper CDT) | DeBERTa | kmeans | 3 | 0.75 | 0.50 | 8 | — | — | 167 | **66.17** | 2026-03-28 | Kasumi.gpt41.depth3.relation.pkl | SAME as Sonnet CDT! CDT quality = GPT-4.1 quality. |
+| 9 | Sonnet CDT, Haiku gen+eval | Haiku | Haiku | Qwen3-8B | Qwen3-8B | DeBERTa | kmeans | 3 | 0.75 | 0.50 | 8 | 30 | 88 | 167 | 50.00 | 2026-03-28 | Kasumi.sonnet.qwen8b.deberta.kmeans.d3.a75.r50.relation.pkl | Cheapest baseline. ~8pt per model tier. |
 
 ## Analysis
 
@@ -59,5 +60,5 @@
 
 - [x] Sonnet CDT with Sonnet gen+eval — **66.17** (dominant factor confirmed)
 - [x] GPT-4.1 CDT with Sonnet gen+eval — **66.17** (identical to Sonnet CDT! CDT quality matches GPT-4.1)
-- [ ] Haiku+Haiku (cheapest baseline for cost comparison)
+- [x] Haiku+Haiku — **50.00** (cheapest baseline, confirms eval model quality ladder)
 - [ ] Investigate RP gen model impact — is Claude generating different action quality than Llama-8B?
