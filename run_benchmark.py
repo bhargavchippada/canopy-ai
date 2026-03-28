@@ -224,22 +224,19 @@ def evaluate(
     engine: str = HYPOTHESIS_MODEL,
     eval_engine: str = EVAL_MODEL,
     include_relationships: bool = True,
-) -> int:
+) -> dict[str, Any]:
     """Evaluate a single scene-action pair.
 
-    Requires ``init_validation_models()`` to have been called first
-    (handled by ``benchmark()``). Direct callers must initialize models.
-
-    Args:
-        character: Character name.
-        d: Dict with keys: condition, question, action, last_character.
-        method: Evaluation method (cdt_package, vanilla, etc.).
-        cdts: Pre-loaded CDT package dict with topic2cdt and rel_topic2cdt.
-        engine: Model for response generation.
-        eval_engine: Model for eval scoring.
-
-    Returns:
-        Score: 100 (entails), 50 (neutral), or 0 (contradicts).
+    Returns a dict with all data for analysis:
+    - score: numeric (100/50/0)
+    - score_letter: A/B/C
+    - prediction: generated RP text
+    - ground_truth: expected action
+    - scene: input scene text
+    - grounding: CDT statements used (or None)
+    - eval_reasoning: evaluator's reasoning text
+    - eval_model: which model scored
+    - gen_model: which model generated
     """
     scene = d["condition"]
     question = d["question"]
@@ -295,23 +292,29 @@ Output in json:
 }}
 ```"""
 
-    log.debug("-" * 100)
-    log.debug("Prediction: %s", prediction)
-    log.debug("." * 100)
-    log.debug("Ground truth: %s", action)
-    log.debug("-" * 100)
-
     score_response = generate(score_instruction, model=eval_engine)
 
+    reasoning = ""
     try:
         parsed = extract_json(score_response)
         score_letter = str(parsed.get("score", "B")).strip().upper()
+        reasoning = str(parsed.get("reasoning", ""))
     except ValueError:
         log.warning("Failed to parse score JSON, defaulting to B. Response: %.200s", score_response)
         score_letter = "B"
     score = SCORE_MAP.get(score_letter, 50)
 
-    return score
+    return {
+        "score": score,
+        "score_letter": score_letter,
+        "prediction": prediction,
+        "ground_truth": action,
+        "scene": scene,
+        "grounding": grounding,
+        "eval_reasoning": reasoning,
+        "eval_model": eval_engine,
+        "gen_model": engine,
+    }
 
 
 def evaluate_multi(
@@ -545,7 +548,7 @@ def benchmark(
 
         scores = [int(r["ensemble_mean"]) for r in valid]
     else:
-        results: list[int | None] = [None] * total
+        eval_results: list[dict[str, Any] | None] = [None] * total
 
         with ThreadPoolExecutor(max_workers=max_parallel) as executor:
             futures = {}
@@ -561,18 +564,19 @@ def benchmark(
             for future in as_completed(futures):
                 idx = futures[future]
                 try:
-                    results[idx] = future.result()
+                    eval_results[idx] = future.result()
                 except Exception as exc:
                     log.error("evaluate() failed for pair #%d, skipping: %s", idx + 1, exc)
                 bar.update(1)
-                valid_scores = [s for s in results if s is not None]
-                if valid_scores:
-                    mean_score = float(np.mean(valid_scores))
-                    log.info("#%d/%d NLI Score: %.2f", len(valid_scores), total, mean_score)
+                valid = [r for r in eval_results if r is not None]
+                if valid:
+                    mean_score = float(np.mean([r["score"] for r in valid]))
+                    log.info("#%d/%d NLI Score: %.2f", len(valid), total, mean_score)
                     bar.set_description(f"Score={mean_score:.4f}")
 
         bar.close()
-        scores = [s for s in results if s is not None]
+        valid_results = [r for r in eval_results if r is not None]
+        scores = [r["score"] for r in valid_results]
 
     if not scores:
         log.warning("No test pairs evaluated for %s with method %s", character, method)
@@ -581,7 +585,8 @@ def benchmark(
     if not multi_eval:
         final_score = float(np.mean(scores))
 
-    # Save benchmark results with provenance
+    # Save benchmark results with provenance (rich per-pair data when available)
+    save_results: list[Any] = valid_results if not multi_eval else scores  # type: ignore[possibly-undefined]
     try:
         _save_benchmark_results(
             character=character,
@@ -591,7 +596,7 @@ def benchmark(
             cdt_path=pkg_path if method == "cdt_package" else None,
             cdt_metadata=cdts.get("metadata") if cdts else None,
             score=final_score,
-            per_pair_results=results,
+            per_pair_results=save_results,
             has_relationships=(include_relationships and bool(cdts.get("rel_topic2cdt"))) if cdts else False,
         )
     except OSError as exc:
