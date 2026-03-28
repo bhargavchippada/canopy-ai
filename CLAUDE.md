@@ -9,10 +9,13 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 ## Current Phase
 
 **Phase 0: COMPLETE** — 3 characters validated (Kasumi, Arisa, Yui).
-**Phase 1: Code Modernization** — Restructuring into `src/canopy/` package (IN PROGRESS).
-- Package modules: core.py, embeddings.py, validation.py, prompts.py, llm.py, data.py
-- CLI wrapper verified: Kasumi CDT runs with new structure
-**Next:** Phase 2 (Core Library API) — BehavioralObservation, HDBSCAN, semantic gates.
+**Phase 1: COMPLETE** — Package restructured into `src/canopy/`, 91% test coverage.
+**Phase 2: Core Library API** — IN PROGRESS.
+- BehavioralObservation as primary input type
+- builder.py: build_cdt(), build_character_profile()
+- wikify.py: CDT → markdown profiles
+- cluster.py: KMeansCluster, HDBSCANCluster (with Protocol)
+**Next:** Phase 3 (T-CDT + Advanced Features).
 
 ## Design Reference
 
@@ -46,18 +49,29 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 - **Testing:** pytest
 - **Linting:** ruff
 
-## LLM Adapter
-
-All LLM calls go through `llm.py` adapter interface:
+## Library API
 
 ```python
-from llm import generate, ClaudeCodeAdapter, set_adapter
+from canopy import BehavioralObservation, CDTConfig, build_cdt, build_character_profile
+from canopy.wikify import wikify_tree, wikify_profile
+from canopy.llm import ClaudeCodeAdapter, set_adapter
 
-# Default: uses ClaudeCodeAdapter with claude-sonnet-4-6
-result = generate("prompt here")
+# 1. Configure LLM
+set_adapter(ClaudeCodeAdapter(default_model="claude-haiku-4-5"))
 
-# Swap adapter at runtime
-set_adapter(ClaudeCodeAdapter(default_model="claude-opus-4-6"))
+# 2. Create observations
+obs = [
+    BehavioralObservation(scene="...", action="...", actor="Alice", participants=["Bob"]),
+]
+
+# 3. Build CDT
+tree = build_cdt(obs, character="Alice", topic="identity", config=CDTConfig(max_depth=2))
+
+# 4. Or build full profile
+topic2cdt, rel_topic2cdt = build_character_profile(obs, character="Alice")
+
+# 5. Wikify to markdown
+markdown = wikify_profile(topic2cdt, rel_topic2cdt, character="Alice")
 ```
 
 See `artifacts/llm-adapters.md` for provider comparison.
@@ -100,9 +114,12 @@ Models stored in `~/models/`:
 ```
 canopy-ai/
 ├── src/canopy/                # Core package
-│   ├── __init__.py            # Exports: CDTConfig, CDTNode, build_character_cdts
+│   ├── __init__.py            # Exports: CDTConfig, CDTNode, BehavioralObservation, build_*
 │   ├── core.py                # CDTNode, CDTConfig, build_character_cdts
-│   ├── embeddings.py          # Model loading, encoding, KMeans clustering
+│   ├── builder.py             # BehavioralObservation, build_cdt, build_character_profile
+│   ├── wikify.py              # CDT → markdown profiles (wikify_tree, wikify_profile)
+│   ├── cluster.py             # KMeansCluster, HDBSCANCluster, ClusterStrategy Protocol
+│   ├── embeddings.py          # Model loading, encoding (uses cluster.py)
 │   ├── validation.py          # NLI-based scene/statement validation (DeBERTa)
 │   ├── prompts.py             # Hypothesis generation prompts + batch processing
 │   ├── llm.py                 # LLM adapter (Protocol + ClaudeCodeAdapter)

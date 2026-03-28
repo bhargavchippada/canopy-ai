@@ -5,7 +5,6 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn.functional as F
-from sklearn.cluster import KMeans
 from tqdm import tqdm
 
 # Module-level model references — set by init_models()
@@ -70,6 +69,8 @@ def select_cluster_centers(
     actions = [pair["action"] for pair in pairs]
     scenes = [pair["scene"] for pair in pairs]
 
+    from canopy.cluster import KMeansCluster, select_representative_samples
+
     with torch.no_grad():
         document_embeddings = []
         for idx in tqdm(range(0, len(actions), bs), desc="Embedding...", leave=True):
@@ -80,16 +81,7 @@ def select_cluster_centers(
             )
         document_embeddings = np.concatenate(document_embeddings, 0)
 
-    n_clusters = min(int(np.ceil(document_embeddings.shape[0] / n_in_cluster_case)), n_max_cluster)
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-    kmeans.fit(document_embeddings)
+    clusterer = KMeansCluster(n_in_cluster_case=n_in_cluster_case, n_max_cluster=n_max_cluster)
+    _, centroids = clusterer.fit_predict(document_embeddings)
 
-    centroids = kmeans.cluster_centers_
-    clusters: list[list[dict]] = []
-
-    for centroid in centroids:
-        distances = (((document_embeddings - centroid) ** 2).sum(-1)) ** 0.5
-        cluster = [pairs[idx] for idx in distances.argsort(-1)[:n_in_cluster_sample]]
-        clusters.append(cluster)
-
-    return clusters
+    return select_representative_samples(pairs, document_embeddings, centroids, n_samples=n_in_cluster_sample)

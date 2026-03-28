@@ -109,7 +109,9 @@ def _mock_cluster_fn(character: str, pairs: list, **kw: Any) -> list[list[dict]]
     return [pairs[:mid], pairs[mid:]]
 
 
-def _mock_hypothesize(clusters: list, character: str, topic: str, est: list, gp: list, **kw: Any) -> tuple[list[str], list[str]]:
+def _mock_hypothesize(
+    clusters: list, character: str, topic: str, est: list, gp: list, **kw: Any,
+) -> tuple[list[str], list[str]]:
     return ([f"{character} is brave", f"{character} helps"], ["Danger?", "Friend nearby?"])
 
 
@@ -276,7 +278,8 @@ class TestBuildCharacterCdts:
         assert "Alice's interaction with Bob" in r
 
     def test_relationship_threshold_not_met(self) -> None:
-        pairs = [{"action": f"a{i}", "scene": f"s{i}", "last_character": ["Bob"]} for i in range(MIN_RELATION_PAIRS - 1)]
+        n = MIN_RELATION_PAIRS - 1
+        pairs = [{"action": f"a{i}", "scene": f"s{i}", "last_character": ["Bob"]} for i in range(n)]
         _, r = build_character_cdts("Alice", pairs, ["Bob"], config=CDTConfig(max_depth=0))
         assert len(r) == 0
 
