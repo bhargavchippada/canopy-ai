@@ -19,8 +19,10 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
+from canopy.builder import BehavioralObservation
 from canopy.core import CDTNode
 from canopy.data import load_ar_pairs, load_character_metadata
+from canopy.episodic import EpisodicIndex, format_grounding, hybrid_ground
 from canopy.llm import EVAL_MODEL, HYPOTHESIS_MODEL, extract_json, generate
 from canopy.validation import init_models as init_validation_models
 
@@ -226,6 +228,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Limit evaluation to first N test pairs (for quick testing).",
     )
+    parser.add_argument(
+        "--top_k",
+        type=int,
+        default=10,
+        help="Top-k observations for hybrid RAG retrieval (default: 10).",
+    )
+    parser.add_argument(
+        "--gate_threshold",
+        type=float,
+        default=0.3,
+        help="Gate similarity threshold for hybrid RAG filtering (default: 0.3).",
+    )
+    parser.add_argument(
+        "--surface_embedder",
+        type=str,
+        default="~/models/Qwen3-Embedding-0.6B",
+        help="Path to surface embedding model for hybrid mode.",
+    )
 
     return parser
 
@@ -245,6 +265,10 @@ def evaluate(
     eval_engine: str = EVAL_MODEL,
     include_relationships: bool = True,
     narration: bool = False,
+    episodic_index: EpisodicIndex | None = None,
+    embed_fn: Any | None = None,
+    top_k: int = 10,
+    gate_threshold: float = 0.3,
 ) -> dict[str, Any]:
     """Evaluate a single scene-action pair.
 
@@ -289,6 +313,20 @@ def evaluate(
             last_character,
             cdts,
             include_relationships=include_relationships,
+        )
+    elif method == "hybrid":
+        if episodic_index is None or embed_fn is None:
+            raise ValueError("hybrid method requires episodic_index and embed_fn")
+        grounding = _build_hybrid_grounding(
+            character,
+            scene,
+            last_character,
+            cdts,
+            episodic_index,
+            embed_fn,
+            include_relationships=include_relationships,
+            top_k=top_k,
+            gate_threshold=gate_threshold,
         )
     else:
         grounding = None
@@ -430,6 +468,42 @@ Output in json:
     }
 
 
+def _build_hybrid_grounding(
+    character: str,
+    scene: str,
+    last_character: list[str],
+    cdts: dict[str, Any],
+    episodic_index: EpisodicIndex,
+    embed_fn: Any,
+    *,
+    include_relationships: bool = True,
+    top_k: int = 10,
+    gate_threshold: float = 0.3,
+) -> str:
+    """Build grounding text using CDT-guided RAG (hybrid approach)."""
+    topic2cdt = cdts["topic2cdt"]
+    rel_topic2cdt = cdts["rel_topic2cdt"]
+
+    # Combine attribute + relationship CDTs for traversal
+    all_cdts: dict[str, CDTNode] = dict(topic2cdt)
+    if include_relationships:
+        for c in last_character:
+            topic = f"{character}'s interaction with {c}"
+            if topic in rel_topic2cdt:
+                all_cdts[topic] = rel_topic2cdt[topic]
+
+    result = hybrid_ground(
+        scene,
+        all_cdts,
+        episodic_index,
+        embed_fn=embed_fn,
+        top_k=top_k,
+        gate_threshold=gate_threshold,
+    )
+
+    return format_grounding(result, max_behavioral=30, max_factual=top_k)
+
+
 def _build_cdt_grounding(
     character: str,
     scene: str,
@@ -480,6 +554,9 @@ def benchmark(
     multi_eval: bool = False,
     max_pairs: int | None = None,
     narration: bool = False,
+    top_k: int = 10,
+    gate_threshold: float = 0.3,
+    surface_embedder: str = "~/models/Qwen3-Embedding-0.6B",
 ) -> list[int] | float:
     """Run the full benchmark for a character.
 
@@ -510,15 +587,71 @@ def benchmark(
     # Load CDT package once (hoisted out of evaluate)
     cdts: dict[str, Any] = {}
     pkg_path: str | None = None
-    if method == "cdt_package":
+    episodic_index: EpisodicIndex | None = None
+    embed_fn: Any = None
+
+    if method in ("cdt_package", "hybrid"):
         if cdt_path is None:
             raise ValueError(
-                "--cdt_path is required when method is 'cdt_package'. Specify the path to the CDT package pkl file."
+                f"--cdt_path is required when method is '{method}'. Specify the path to the CDT package pkl file."
             )
         pkg_path = cdt_path
         cdts = load_cdt_package(pkg_path)
         _validate_cdt_package(cdts, character)
         log.info("Loaded CDT package from %s", pkg_path)
+
+    if method == "hybrid":
+        # Build EpisodicIndex from training pairs
+        _, character2artifact, band2members = load_character_metadata()
+        train_pairs = load_ar_pairs(character, character2artifact, band2members)["train"]
+        log.info("Building EpisodicIndex from %d training pairs...", len(train_pairs))
+
+        observations = [
+            BehavioralObservation(
+                scene=p["scene"],
+                action=p["action"],
+                actor=character,
+            )
+            for p in train_pairs
+        ]
+
+        # Pre-compute embeddings
+        from canopy.embeddings import precompute_embeddings
+        resolved_embedder = os.path.expanduser(surface_embedder)
+        cache = precompute_embeddings(
+            character=character,
+            pairs=[o.to_pair() for o in observations],
+            surface_embedder_path=resolved_embedder,
+            generator_embedder_path=resolved_embedder,  # reuse surface for gen (both small)
+            device=f"cuda:{device_id}",
+        )
+        episodic_index = EpisodicIndex.from_embedding_cache(observations, cache)
+        log.info("EpisodicIndex ready: %d entries", len(episodic_index))
+
+        # Build embed_fn for query embedding
+        log.info("Loading surface embedder for query embedding...")
+        from transformers import AutoModel, AutoTokenizer
+        _tokenizer = AutoTokenizer.from_pretrained(resolved_embedder)
+        _embed_model = AutoModel.from_pretrained(resolved_embedder).to(device)
+        _embed_model.eval()
+
+        @torch.no_grad()
+        def _embed_fn(text: str) -> np.ndarray:
+            inputs = _tokenizer(
+                text, return_tensors="pt", truncation=True, max_length=512, padding=True,
+            ).to(device)
+            outputs = _embed_model(**inputs)
+            mask = inputs["attention_mask"].unsqueeze(-1).float()
+            hidden = outputs.last_hidden_state * mask
+            pooled = hidden.sum(dim=1) / mask.sum(dim=1)
+            vec = pooled[0].cpu().numpy()
+            norm = np.linalg.norm(vec)
+            if norm > 0:
+                vec = vec / norm
+            return vec
+
+        embed_fn = _embed_fn
+        log.info("Hybrid grounding ready")
 
     # Build evaluation items upfront
     items: list[dict[str, Any]] = []
@@ -602,6 +735,10 @@ def benchmark(
                     engine=engine, eval_engine=eval_engine,
                     include_relationships=include_relationships,
                     narration=narration,
+                    episodic_index=episodic_index,
+                    embed_fn=embed_fn,
+                    top_k=top_k,
+                    gate_threshold=gate_threshold,
                 )
                 futures[future] = i
 
@@ -711,6 +848,9 @@ def main() -> None:
         multi_eval=args.multi_eval,
         max_pairs=args.max_pairs,
         narration=args.narration,
+        top_k=args.top_k,
+        gate_threshold=args.gate_threshold,
+        surface_embedder=args.surface_embedder,
     )
     log.info("Final NLI Score: %.2f", result)
 
