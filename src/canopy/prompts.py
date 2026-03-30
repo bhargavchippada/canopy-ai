@@ -161,15 +161,23 @@ def merge_similar_hypotheses(
     gates: list[str],
     statement_candidates: list[str],
     *,
-    similarity_threshold: float = 0.90,
+    similarity_threshold: float = 0.85,
+    embed_fn: Any | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Merge near-duplicate hypothesis pairs based on text cosine similarity.
+    """Merge semantically duplicate hypothesis pairs via embedding cosine similarity.
 
-    Pairs with statement cosine similarity > threshold are deduplicated —
-    the shorter (more concise) statement is kept. This reduces redundancy
-    before validation, improving CDT quality by avoiding duplicate gates.
+    Pairs with statement embedding cosine similarity > threshold are deduplicated —
+    the shorter (more concise) statement is kept. This catches semantic duplicates
+    that lexical matching misses (e.g., "lapse into quiet" ≈ "shift from quietness").
 
-    Uses simple character-trigram similarity (no GPU model needed).
+    Args:
+        gates: Scene-check hypothesis questions (aligned with statement_candidates).
+        statement_candidates: Action hypothesis statements.
+        similarity_threshold: Cosine similarity above which statements are merged.
+            Default 0.85 (embedding space, lower than lexical 0.90 because
+            embeddings capture semantic similarity more precisely).
+        embed_fn: Optional callable (text) → np.ndarray for embedding.
+            If None, uses the LLM to judge similarity instead.
     """
     if len(gates) != len(statement_candidates):
         raise ValueError(
@@ -179,43 +187,59 @@ def merge_similar_hypotheses(
     if len(statement_candidates) <= 1:
         return gates, statement_candidates
 
-    # Compute pairwise similarity using character trigrams (fast, no model)
-    def _trigrams(text: str) -> set[str]:
-        t = text.lower().strip()
-        if len(t) < 3:
-            return {t} if t else set()
-        return {t[i:i + 3] for i in range(len(t) - 2)}
-
-    def _jaccard(a: set[str], b: set[str]) -> float:
-        if not a or not b:
-            return 0.0
-        return len(a & b) / len(a | b)
-
-    trigrams = [_trigrams(s) for s in statement_candidates]
     n = len(statement_candidates)
     merged_into: list[int | None] = [None] * n  # None = keep, int = merged into index
 
-    for i in range(n):
-        if merged_into[i] is not None:
-            continue
-        for j in range(i + 1, n):
-            if merged_into[j] is not None:
+    if embed_fn is not None:
+        # Embedding-based similarity (preferred)
+        import numpy as np
+        embeddings = np.stack([embed_fn(s) for s in statement_candidates])
+        # Cosine similarity matrix (embeddings assumed L2-normalized)
+        sim_matrix = embeddings @ embeddings.T
+
+        for i in range(n):
+            if merged_into[i] is not None:
                 continue
-            sim = _jaccard(trigrams[i], trigrams[j])
-            if sim >= similarity_threshold:
-                # Keep the shorter (more concise) statement
-                if len(statement_candidates[i]) <= len(statement_candidates[j]):
-                    merged_into[j] = i
-                else:
-                    merged_into[i] = j
-                    break  # i merged into j — j continues as representative
+            for j in range(i + 1, n):
+                if merged_into[j] is not None:
+                    continue
+                if float(sim_matrix[i, j]) >= similarity_threshold:
+                    if len(statement_candidates[i]) <= len(statement_candidates[j]):
+                        merged_into[j] = i
+                    else:
+                        merged_into[i] = j
+                        break
+    else:
+        # LLM-based similarity fallback
+        for i in range(n):
+            if merged_into[i] is not None:
+                continue
+            for j in range(i + 1, n):
+                if merged_into[j] is not None:
+                    continue
+                prompt = (
+                    f"Are these two statements about the same behavioral pattern? "
+                    f"Answer only 'yes' or 'no'.\n\n"
+                    f"Statement A: {statement_candidates[i]}\n"
+                    f"Statement B: {statement_candidates[j]}"
+                )
+                try:
+                    answer = generate(prompt, max_tokens=5).strip().lower()
+                    if answer.startswith("yes"):
+                        if len(statement_candidates[i]) <= len(statement_candidates[j]):
+                            merged_into[j] = i
+                        else:
+                            merged_into[i] = j
+                            break
+                except Exception:
+                    pass  # Keep both on failure
 
     kept_gates = [g for idx, g in enumerate(gates) if merged_into[idx] is None]
     kept_stmts = [s for idx, s in enumerate(statement_candidates) if merged_into[idx] is None]
 
     n_merged = sum(1 for m in merged_into if m is not None)
     if n_merged > 0:
-        log.info("Merged %d/%d near-duplicate hypotheses (threshold=%.2f)",
+        log.info("Merged %d/%d semantically duplicate hypotheses (threshold=%.2f)",
                  n_merged, n, similarity_threshold)
 
     return kept_gates, kept_stmts
