@@ -160,6 +160,7 @@ class TestCDTNodeBuild:
             _validator=_mock_validate_accept,
             _hypothesis_fn=_mock_hypothesize,
             _summarize_fn=_mock_summarize,
+            _merge_fn=lambda gates, stmts: (gates, stmts),  # no-op merge
         )
         assert len(node.statements) == 2
         assert "Alice is brave" in node.statements
@@ -176,6 +177,7 @@ class TestCDTNodeBuild:
             _validator=_mock_validate_gated,
             _hypothesis_fn=_mock_hypothesize,
             _summarize_fn=_mock_summarize,
+            _merge_fn=lambda gates, stmts: (gates, stmts),
         )
         assert node.statements == []
         assert len(node.gates) == 2
@@ -193,6 +195,7 @@ class TestCDTNodeBuild:
             _validator=_mock_validate_reject,
             _hypothesis_fn=_mock_hypothesize,
             _summarize_fn=_mock_summarize,
+            _merge_fn=lambda gates, stmts: (gates, stmts),
         )
         assert node.statements == []
         assert node.gates == []
@@ -218,6 +221,7 @@ class TestCDTNodeBuild:
             _validator=partial_validate,
             _hypothesis_fn=_mock_hypothesize,
             _summarize_fn=_mock_summarize,
+            _merge_fn=lambda gates, stmts: (gates, stmts),
         )
         # Should have created recursive children (not built_statements leaf)
         assert len(node.gates) == 2
@@ -243,6 +247,7 @@ class TestCDTNodeBuild:
             _validator=_mock_validate_accept,
             _hypothesis_fn=_mock_hypothesize,
             _summarize_fn=_mock_summarize,
+            _merge_fn=lambda gates, stmts: (gates, stmts),
         )
         assert "cluster" in calls
 

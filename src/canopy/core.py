@@ -38,6 +38,7 @@ ClusterFn = Callable[..., list[list[dict[str, Any]]]]
 ValidateFn = Callable[..., tuple[dict[str, float], list[dict[str, Any]]]]
 HypothesisFn = Callable[..., tuple[list[str], list[str]]]
 SummarizeFn = Callable[..., tuple[list[str], list[str]]]
+MergeFn = Callable[[list[str], list[str]], tuple[list[str], list[str]]]
 
 # Minimum pairs required for tree construction
 MIN_PAIRS_FOR_TREE = 8
@@ -70,6 +71,7 @@ class CDTNode:
         _validator: ValidateFn | None = None,
         _hypothesis_fn: HypothesisFn | None = None,
         _summarize_fn: SummarizeFn | None = None,
+        _merge_fn: MergeFn | None = None,
         _embedding_cache: Any | None = None,
     ) -> None:
         self.statements: list[str] = []
@@ -99,6 +101,7 @@ class CDTNode:
                 _validator,
                 _hypothesis_fn,
                 _summarize_fn,
+                _merge_fn,
                 _embedding_cache,
             )
 
@@ -114,6 +117,7 @@ class CDTNode:
         validator: ValidateFn | None,
         hypothesis_fn: HypothesisFn | None,
         summarize_fn: SummarizeFn | None,
+        merge_fn: MergeFn | None,
         embedding_cache: Any | None = None,
     ) -> None:
         """Build the tree node via hypothesis generation + validation."""
@@ -124,6 +128,7 @@ class CDTNode:
         _validate = validator or validate_hypothesis
         _hypothesize = hypothesis_fn or make_hypotheses_batch
         _summarize = summarize_fn or summarize_triggers
+        _merge = merge_fn or merge_similar_hypotheses
 
         # When embedding_cache is provided and no custom embedder override,
         # pass cache through to select_cluster_centers for zero-GPU clustering
@@ -157,7 +162,7 @@ class CDTNode:
         )
 
         # E1: Merge near-duplicate hypotheses before summarization
-        gates, statement_candidates = merge_similar_hypotheses(gates, statement_candidates)
+        gates, statement_candidates = _merge(gates, statement_candidates)
         gates, statement_candidates = _summarize(character, gates, statement_candidates)
         global_statements: list[str] = []
         gated_statements: list[str] = []
@@ -204,6 +209,7 @@ class CDTNode:
                             _validator=_validate,
                             _hypothesis_fn=_hypothesize,
                             _summarize_fn=_summarize,
+                            _merge_fn=merge_fn,
                             _embedding_cache=embedding_cache,
                         )
                     )
@@ -222,6 +228,7 @@ class CDTNode:
                             _validator=_validate,
                             _hypothesis_fn=_hypothesize,
                             _summarize_fn=_summarize,
+                            _merge_fn=merge_fn,
                             _embedding_cache=embedding_cache,
                         )
                     )
