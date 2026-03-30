@@ -42,7 +42,11 @@ def check_scene(texts: list[str], questions: list[str]) -> list[bool | None]:
 
     with _model_lock:
         with torch.no_grad():
-            logits = _classifier(**_classifier_tokenizer(prompts, return_tensors="pt", padding=True).to(_device)).logits
+            inputs = _classifier_tokenizer(
+                prompts, return_tensors="pt", padding=True,
+                truncation=True, max_length=512,
+            ).to(_device)
+            logits = _classifier(**inputs).logits
             choices = logits.argmax(-1)
 
     return [[False, None, True][choice.item()] for choice in choices]
@@ -81,7 +85,10 @@ Directly answer only yes/no/unknown."""
 
     with _model_lock:
         with torch.no_grad():
-            logits = _classifier(**_classifier_tokenizer(prompts, return_tensors="pt", padding=True).to(_device)).logits
+            logits = _classifier(**_classifier_tokenizer(
+                prompts, return_tensors="pt", padding=True,
+                truncation=True, max_length=512,
+            ).to(_device)).logits
             probs = logits.softmax(-1).sum(0).detach().cpu().numpy()
 
     return probs
