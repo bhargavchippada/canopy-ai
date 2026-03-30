@@ -70,6 +70,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--threshold_filter", type=float, default=0.8)
     parser.add_argument("--cluster_method", type=str, default="kmeans", choices=["kmeans", "hdbscan"])
     parser.add_argument("--device_id", type=int, default=0)
+    parser.add_argument("--time_decay", action="store_true", default=False, help="Enable T-CDT temporal weighting")
+    parser.add_argument(
+        "--half_life_days", type=int, default=5,
+        help="T-CDT half-life in days (default: 5 for chapter-based data)",
+    )
 
     return parser
 
@@ -122,7 +127,11 @@ def main() -> None:
         threshold_accept=args.threshold_accept,
         threshold_reject=args.threshold_reject,
         threshold_filter=args.threshold_filter,
+        time_decay_enabled=args.time_decay,
+        time_decay_half_life_days=args.half_life_days,
     )
+    if args.time_decay:
+        log.info("T-CDT enabled: half_life=%d days", args.half_life_days)
 
     # Phase B: Build CDTs (no GPU model loading, max_parallel=4)
     # Uses pre-computed embeddings for clustering. Only LLM API + DeBERTa.
@@ -148,10 +157,11 @@ def main() -> None:
     a_val = int(args.threshold_accept * 100)
     r_val = int(args.threshold_reject * 100)
     rel_suffix = ".relation" if rel_topic2cdt else ""
+    tcdt_suffix = f".tcdt{args.half_life_days}d" if args.time_decay else ""
 
     output_path = (
         f"packages/{args.character}.{gen_short}.{embed_short}.{nli_short}"
-        f".{cluster_short}.d{args.max_depth}.a{a_val}.r{r_val}{rel_suffix}.pkl"
+        f".{cluster_short}.d{args.max_depth}.a{a_val}.r{r_val}{tcdt_suffix}{rel_suffix}.pkl"
     )
 
     metadata = {
@@ -167,6 +177,8 @@ def main() -> None:
         "threshold_filter": args.threshold_filter,
         "hypotheses_per_cluster": 3,  # k param in make_hypothesis_prompt
         "n_training_pairs": len(pairs),
+        "time_decay_enabled": args.time_decay,
+        "time_decay_half_life_days": args.half_life_days if args.time_decay else None,
         "temperature": 0.0,  # deterministic via claude-agent-sdk
         "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "total_nodes": total_nodes,
