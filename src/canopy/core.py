@@ -21,12 +21,16 @@ class CDTConfig:
         threshold_accept: Accuracy above which a statement is accepted globally.
         threshold_reject: Accuracy below which a gated statement is discarded.
         threshold_filter: Broadness below which a gated statement triggers recursion.
+        time_decay_enabled: Enable T-CDT temporal weighting in validation.
+        time_decay_half_life_days: Half-life for temporal weight decay.
     """
 
     max_depth: int = 3
     threshold_accept: float = 0.8
     threshold_reject: float = 0.5
     threshold_filter: float = 0.8
+    time_decay_enabled: bool = False
+    time_decay_half_life_days: int = 90
 
 
 # Type alias for dependency-injected callables
@@ -157,8 +161,15 @@ class CDTNode:
         gated_statements: list[str] = []
         remained_gates: list[str] = []
 
+        temporal_kwargs: dict[str, Any] = {}
+        if cfg.time_decay_enabled:
+            temporal_kwargs = {
+                "time_decay_enabled": True,
+                "time_decay_half_life_days": cfg.time_decay_half_life_days,
+            }
+
         for gate, stmt in zip(gates, statement_candidates):
-            res, _ = _validate(character, pairs, None, stmt)
+            res, _ = _validate(character, pairs, None, stmt, **temporal_kwargs)
             correctness = res.get("True", 0) / (res.get("True", 0) + res.get("False", 0) + 1e-8) + 1e-8
             if correctness >= cfg.threshold_accept:
                 global_statements.append(stmt)
@@ -169,7 +180,7 @@ class CDTNode:
         self.statements.extend(global_statements)
 
         for gate, stmt in zip(remained_gates, gated_statements):
-            res, filtered_pairs = _validate(character, pairs, gate, stmt)
+            res, filtered_pairs = _validate(character, pairs, gate, stmt, **temporal_kwargs)
             correctness = res.get("True", 0) / (res.get("True", 0) + res.get("False", 0) + 1e-8) + 1e-8
             broadness = 1 - res.get("Irrelevant", 0) / (sum(res.values()) + 1e-8)
             if broadness <= cfg.threshold_filter:

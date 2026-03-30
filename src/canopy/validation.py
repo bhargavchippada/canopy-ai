@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -94,14 +95,83 @@ Directly answer only yes/no/unknown."""
     return probs
 
 
+def temporal_weight(timestamp: datetime, half_life_days: int = 90) -> float:
+    """Compute time decay weight. Half-life: weight = 0.5 at half_life_days age.
+
+    More recent evidence gets higher weight. Evidence exactly half_life_days old
+    gets weight 0.5. Very old evidence approaches 0 but never reaches it.
+    """
+    now = datetime.now(timezone.utc)
+    age_days = (now - timestamp).total_seconds() / 86400
+    if age_days <= 0:
+        return 1.0
+    return 0.5 ** (age_days / half_life_days)
+
+
+def check_statement_probs_per_pair(
+    character: str,
+    actions: list[str],
+    statements: list[str],
+    bs: int = 64,
+) -> np.ndarray:
+    """Check statement-action NLI probabilities per pair.
+
+    Returns:
+        numpy array of shape (N, 3) with [false_score, none_score, true_score] per pair.
+    """
+    if _classifier is None:
+        raise RuntimeError("Validation model not initialized — call init_models() first")
+
+    all_probs: list[np.ndarray] = []
+    for idx in range(0, len(actions), bs):
+        batch_actions = actions[idx:idx + bs]
+        batch_stmts = statements[idx:idx + bs]
+        prompts = [
+            f"""Character: {character}
+
+Action: {action}
+
+Statement: {statement}
+
+Question: Does the statement provide correct grounding, which directly supports the character to take the action?
+
+yes: the action involves direct information from the statement.
+
+no: the action indicates the statement's assertion is not always correctly.
+
+unknown: the action is irrelevant to the statement or the causal relationship cannot be determined
+
+Directly answer only yes/no/unknown."""
+            for action, statement in zip(batch_actions, batch_stmts)
+        ]
+
+        with _model_lock:
+            with torch.no_grad():
+                logits = _classifier(**_classifier_tokenizer(
+                    prompts, return_tensors="pt", padding=True,
+                    truncation=True, max_length=512,
+                ).to(_device)).logits
+                probs = logits.softmax(-1).detach().cpu().numpy()  # (batch, 3)
+                all_probs.append(probs)
+
+    return np.concatenate(all_probs, axis=0)  # (N, 3)
+
+
 def validate_hypothesis(
     character: str,
     pairs: list[dict[str, Any]],
     hypothesized_question: str | None,
     hypothesized_action: str,
     bs: int = 64,
+    *,
+    time_decay_enabled: bool = False,
+    time_decay_half_life_days: int = 90,
 ) -> tuple[dict[str, float], list[dict[str, Any]]]:
     """Validate a hypothesis against all pairs.
+
+    When time_decay_enabled=True and pairs have '_timestamp' keys,
+    each pair's NLI verdict is weighted by temporal recency (T-CDT).
+    More recent pairs contribute more to the final True/False/None scores.
 
     Returns (result_counts, filtered_pairs).
     """
@@ -125,12 +195,30 @@ def validate_hypothesis(
         else:
             res["Irrelevant"] += 1.0
 
-    for idx in tqdm(range(0, len(filtered_pairs), bs), desc="Validating Statements...", leave=True):
-        pairs_batch = filtered_pairs[idx : idx + bs]
-        actions = [pair["action"] for pair in pairs_batch]
-        score = check_statement_probs(character, actions, [hypothesized_action] * len(pairs_batch))
-        res["False"] += score[0]
-        res["None"] += score[1]
-        res["True"] += score[2]
+    if not filtered_pairs:
+        return dict(res), filtered_pairs
+
+    if time_decay_enabled:
+        # T-CDT: per-pair NLI scoring with temporal weights
+        actions = [pair["action"] for pair in filtered_pairs]
+        per_pair_probs = check_statement_probs_per_pair(
+            character, actions, [hypothesized_action] * len(actions), bs=bs,
+        )  # (N, 3) — [false, none, true] per pair
+
+        for i, pair in enumerate(filtered_pairs):
+            ts = pair.get("_timestamp")
+            weight = temporal_weight(ts, time_decay_half_life_days) if ts else 1.0
+            res["False"] += float(per_pair_probs[i, 0]) * weight
+            res["None"] += float(per_pair_probs[i, 1]) * weight
+            res["True"] += float(per_pair_probs[i, 2]) * weight
+    else:
+        # Standard CDT: aggregate scoring (original behavior)
+        for idx in tqdm(range(0, len(filtered_pairs), bs), desc="Validating Statements...", leave=True):
+            pairs_batch = filtered_pairs[idx : idx + bs]
+            actions = [pair["action"] for pair in pairs_batch]
+            score = check_statement_probs(character, actions, [hypothesized_action] * len(pairs_batch))
+            res["False"] += score[0]
+            res["None"] += score[1]
+            res["True"] += score[2]
 
     return dict(res), filtered_pairs

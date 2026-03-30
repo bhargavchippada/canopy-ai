@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
@@ -70,15 +71,28 @@ def load_ar_pairs(
     pairs: list[dict] = []
     last_character: list[str] = []
 
+    # Assign synthetic timestamps based on title ordering (chapter_1 = epoch, +1 day per title)
+    title_order = {title: idx for idx, title in enumerate(title2action_series)}
+    epoch = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
     for title in title2action_series:
         action_series = title2action_series[title]
+        title_idx = title_order[title]
+        title_timestamp = epoch + timedelta(days=title_idx)
+
         for item in action_series:
             all_actions.append(item["action"])
             if "character" in item:
                 item["characters"] = [item["character"]]
             if character in item["characters"]:
                 scene = "\n".join(all_actions[-1 - scene_window : -1])
-                pairs.append({**item, "scene": scene, "last_character": last_character})
+                pairs.append({
+                    **item,
+                    "scene": scene,
+                    "last_character": last_character,
+                    "_timestamp": title_timestamp,
+                    "_title_idx": title_idx,
+                })
             last_character = item["characters"]
 
     mid = len(pairs) // 2
