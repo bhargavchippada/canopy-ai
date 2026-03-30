@@ -91,3 +91,19 @@ class TestMergeSimilarHypotheses:
         stmts = ["same text here", "same text here", "same text here"]
         kept_gates, kept_stmts = merge_similar_hypotheses(gates, stmts)
         assert len(kept_stmts) == 1
+
+    def test_three_way_merge_longest_first(self) -> None:
+        """Cover the break path: when i (longest) merges into j (shorter)."""
+        gates = ["g1", "g2", "g3"]
+        # These are close enough (>0.90 Jaccard) for the longest-first pair
+        stmts = [
+            "Kasumi tends to express enthusiasm vocally when performing live today",
+            "Kasumi tends to express enthusiasm vocally when performing live",
+            "Kasumi tends to express enthusiasm vocally when performing live today",
+        ]
+        kept_gates, kept_stmts = merge_similar_hypotheses(gates, stmts)
+        # stmts[0] and stmts[2] are identical → merge
+        # stmts[0] is longer than stmts[1] → if compared, merges into stmts[1] via break
+        assert len(kept_stmts) <= 2
+        # Shortest version should survive
+        assert "Kasumi tends to express enthusiasm vocally when performing live" in kept_stmts

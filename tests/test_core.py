@@ -412,8 +412,8 @@ class TestBuildCharacterCdts:
         with pytest.raises(ValueError, match="max_parallel must be >= 1"):
             build_character_cdts("Alice", [], [], max_parallel=-1)
 
-    def test_build_character_cdts_handles_failure(self) -> None:
-        """A failing CDT build raises RuntimeError reporting the failed topic(s)."""
+    def test_build_character_cdts_handles_partial_failure(self) -> None:
+        """A single topic failure returns partial results instead of raising."""
         call_count = 0
 
         def _failing_cdtnode(*args: Any, **kwargs: Any) -> CDTNode:
@@ -421,9 +421,23 @@ class TestBuildCharacterCdts:
             call_count += 1
             if call_count == 1:
                 raise RuntimeError("GPU OOM")
-            return CDTNode.__new__(CDTNode)
+            node = CDTNode.__new__(CDTNode)
+            node.statements = []
+            node.gates = []
+            node.children = []
+            node.depth = 1
+            return node
 
         with patch("canopy.core.CDTNode", side_effect=_failing_cdtnode):
+            topic2cdt, _rel = build_character_cdts("Alice", [], [], config=CDTConfig())
+            assert len(topic2cdt) == 3  # 3 of 4 attribute topics succeeded
+
+    def test_build_character_cdts_handles_total_failure(self) -> None:
+        """All topics failing raises RuntimeError."""
+        def _always_fail(*args: Any, **kwargs: Any) -> CDTNode:
+            raise RuntimeError("GPU OOM")
+
+        with patch("canopy.core.CDTNode", side_effect=_always_fail):
             with pytest.raises(RuntimeError, match="CDT build failed"):
                 build_character_cdts("Alice", [], [], config=CDTConfig())
 

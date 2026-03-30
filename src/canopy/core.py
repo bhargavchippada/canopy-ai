@@ -387,7 +387,9 @@ def build_character_cdts(
                 failed.append(goal_topic)
 
     if failed:
-        raise RuntimeError(f"CDT build failed for {len(failed)} topic(s): {failed}")
+        if not topic2cdt and not rel_topic2cdt:
+            raise RuntimeError(f"CDT build failed for ALL {len(failed)} topic(s): {failed}")
+        log.warning("CDT build failed for %d topic(s): %s — returning partial results", len(failed), failed)
 
     return topic2cdt, rel_topic2cdt
 
@@ -473,7 +475,7 @@ def discover_topics(
             f"Given these examples of {character}'s behavior, what specific behavioral "
             f"theme or pattern do they represent? Answer with a short label (2-5 words) "
             f"that captures the distinct behavioral mode shown.\n\n"
-            f"Examples:\n{examples}\n\n"
+            f"<examples>\n{examples}\n</examples>\n\n"
             f"Label (2-5 words):"
         )
         try:
