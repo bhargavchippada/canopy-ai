@@ -246,8 +246,31 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="~/models/Qwen3-Embedding-0.6B",
         help="Path to surface embedding model for hybrid mode.",
     )
+    parser.add_argument(
+        "--gen_prompt",
+        type=str,
+        choices=["narration", "dialogue", "dialogue_v2"],
+        default="dialogue",
+        help=(
+            "Gen prompt style: 'narration' (paper original), "
+            "'dialogue' (current default), "
+            "'dialogue_v2' (format-matched with length constraint)."
+        ),
+    )
 
     return parser
+
+
+# Gen prompt templates
+GEN_PROMPTS: dict[str, str] = {
+    "narration": "Answer a concise narration in one sentence.",
+    "dialogue": "Answer in one short sentence of in-character dialogue.",
+    "dialogue_v2": (
+        'Write {character}\'s next line of dialogue. Output ONLY what {character} says, '
+        'in the format "{character}: <dialogue>". Keep it under 15 words. '
+        'Match the tone and energy level of the scene.'
+    ),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +292,7 @@ def evaluate(
     embed_fn: Any | None = None,
     top_k: int = 10,
     gate_threshold: float = 0.3,
+    gen_prompt_style: str = "dialogue",
 ) -> dict[str, Any]:
     """Evaluate a single scene-action pair.
 
@@ -287,11 +311,13 @@ def evaluate(
     question = d["question"]
     action = d["action"]
     last_character = d["last_character"]
+    character = question.split("'s next action")[0].split("be ")[-1] if "'s next action" in question else "Character"
 
-    prompt_suffix = (
-        "Answer a concise narration in one sentence." if narration
-        else "Answer in one short sentence of in-character dialogue."
-    )
+    if narration:
+        prompt_suffix = GEN_PROMPTS["narration"]
+    else:
+        template = GEN_PROMPTS.get(gen_prompt_style, GEN_PROMPTS["dialogue"])
+        prompt_suffix = template.format(character=character) if "{character}" in template else template
     prompt = f"""# Scene
 {scene}
 
@@ -557,6 +583,7 @@ def benchmark(
     top_k: int = 10,
     gate_threshold: float = 0.3,
     surface_embedder: str = "~/models/Qwen3-Embedding-0.6B",
+    gen_prompt_style: str = "dialogue",
 ) -> list[int] | float:
     """Run the full benchmark for a character.
 
@@ -735,6 +762,7 @@ def benchmark(
                     engine=engine, eval_engine=eval_engine,
                     include_relationships=include_relationships,
                     narration=narration,
+                    gen_prompt_style=gen_prompt_style,
                     episodic_index=episodic_index,
                     embed_fn=embed_fn,
                     top_k=top_k,
@@ -851,6 +879,7 @@ def main() -> None:
         top_k=args.top_k,
         gate_threshold=args.gate_threshold,
         surface_embedder=args.surface_embedder,
+        gen_prompt_style=args.gen_prompt,
     )
     log.info("Final NLI Score: %.2f", result)
 
