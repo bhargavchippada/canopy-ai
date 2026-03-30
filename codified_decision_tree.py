@@ -75,6 +75,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--half_life_days", type=int, default=5,
         help="T-CDT half-life in days (default: 5 for chapter-based data)",
     )
+    parser.add_argument(
+        "--discover_topics", action="store_true", default=False,
+        help="Discover additional topics from data (beyond the 4 standard ones)",
+    )
+    parser.add_argument(
+        "--n_extra_topics", type=int, default=4,
+        help="Number of extra topics to discover (default: 4)",
+    )
 
     return parser
 
@@ -139,6 +147,8 @@ def main() -> None:
     topic2cdt, rel_topic2cdt = build_character_cdts(
         args.character, indexed_pairs, other_characters, config,
         max_parallel=4, embedding_cache=cache,
+        discover_extra_topics=args.discover_topics,
+        n_extra_topics=args.n_extra_topics,
     )
 
     # Compute stats
@@ -158,10 +168,11 @@ def main() -> None:
     r_val = int(args.threshold_reject * 100)
     rel_suffix = ".relation" if rel_topic2cdt else ""
     tcdt_suffix = f".tcdt{args.half_life_days}d" if args.time_decay else ""
+    disc_suffix = f".disc{args.n_extra_topics}" if args.discover_topics else ""
 
     output_path = (
         f"packages/{args.character}.{gen_short}.{embed_short}.{nli_short}"
-        f".{cluster_short}.d{args.max_depth}.a{a_val}.r{r_val}{tcdt_suffix}{rel_suffix}.pkl"
+        f".{cluster_short}.d{args.max_depth}.a{a_val}.r{r_val}{tcdt_suffix}{disc_suffix}{rel_suffix}.pkl"
     )
 
     metadata = {

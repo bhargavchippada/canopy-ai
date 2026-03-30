@@ -285,6 +285,7 @@ class CDTNode:
 
 ATTRIBUTE_TOPICS = ("identity", "personality", "ability", "relationship")
 MIN_RELATION_PAIRS = 16
+MIN_TOPIC_PAIRS = 8  # Minimum pairs for a discovered topic to build a CDT
 
 
 def build_character_cdts(
@@ -295,15 +296,18 @@ def build_character_cdts(
     *,
     max_parallel: int = 4,
     embedding_cache: Any | None = None,
+    discover_extra_topics: bool = False,
+    n_extra_topics: int = 4,
 ) -> tuple[dict[str, CDTNode], dict[str, CDTNode]]:
     """Build attribute and relationship CDTs for a character.
 
     Topics are built concurrently using a thread pool. Default ``max_parallel=4``
     overlaps LLM API round-trips across topics.
 
-    When ``embedding_cache`` is provided, no GPU models are loaded during tree
-    building — clustering uses pre-computed embeddings. This eliminates VRAM
-    contention and allows full parallelism.
+    When ``discover_extra_topics=True``, the standard 4 attribute topics are
+    built first, then additional topics are discovered organically from the data
+    via clustering. This surfaces non-dominant behavioral patterns that the
+    fixed topics may miss.
 
     Args:
         character: Character name (e.g. "Kasumi").
@@ -313,6 +317,8 @@ def build_character_cdts(
         config: CDT construction config. Uses defaults if None.
         max_parallel: Maximum concurrent CDT builds. Default 4.
         embedding_cache: Pre-computed embeddings from ``precompute_embeddings()``.
+        discover_extra_topics: If True, discover additional topics from data.
+        n_extra_topics: Number of extra topics to discover (default 4).
 
     Returns:
         (topic2cdt, rel_topic2cdt) — attribute and relationship CDT dicts.
@@ -324,9 +330,21 @@ def build_character_cdts(
     # Collect all tasks: (kind, goal_topic, topic_pairs)
     tasks: list[tuple[str, str, list[dict[str, Any]]]] = []
 
+    # Standard attribute topics (always included)
     for attribute in ATTRIBUTE_TOPICS:
         goal_topic = f"{character}'s {attribute}"
         tasks.append(("attr", goal_topic, pairs))
+
+    # Discovered topics (additional, from data clustering)
+    if discover_extra_topics:
+        discovered = discover_topics(
+            character, pairs,
+            embedding_cache=embedding_cache,
+            n_max_topics=n_extra_topics,
+        )
+        for topic_label, topic_pairs in discovered:
+            tasks.append(("attr", topic_label, topic_pairs))
+            log.info("Added discovered topic: %s (%d pairs)", topic_label, len(topic_pairs))
 
     for other in other_characters:
         goal_topic = f"{character}'s interaction with {other}"
@@ -369,3 +387,100 @@ def build_character_cdts(
         raise RuntimeError(f"CDT build failed for {len(failed)} topic(s): {failed}")
 
     return topic2cdt, rel_topic2cdt
+
+
+def discover_topics(
+    character: str,
+    pairs: list[dict[str, Any]],
+    *,
+    embedding_cache: Any | None = None,
+    n_max_topics: int = 8,
+    min_topic_pairs: int = MIN_TOPIC_PAIRS,
+    model: str | None = None,
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Discover behavioral topics organically from the data.
+
+    Instead of using hardcoded topics (identity, personality, etc.),
+    clusters all observations and labels each cluster as a topic.
+    This surfaces non-dominant behavioral patterns that fixed topics miss.
+
+    Args:
+        character: Character name.
+        pairs: All training pairs (must have _embed_idx if embedding_cache provided).
+        embedding_cache: Pre-computed embeddings from precompute_embeddings().
+        n_max_topics: Maximum number of topics to discover.
+        min_topic_pairs: Minimum pairs per topic (smaller clusters are dropped).
+        model: LLM model for topic labeling.
+
+    Returns:
+        List of (topic_label, topic_pairs) tuples.
+    """
+    from canopy.embeddings import select_cluster_centers
+    from canopy.llm import generate
+
+    if not pairs:
+        return []
+
+    # Step 1: Cluster ALL pairs into behavioral groups
+    # Use larger clusters for topic discovery (not the small samples used in CDT building)
+    if embedding_cache is not None:
+        from canopy.cluster import KMeansCluster
+
+        indices = [p["_embed_idx"] for p in pairs]
+        subset = embedding_cache.subset(indices)
+        clusterer = KMeansCluster(
+            n_in_cluster_case=max(min_topic_pairs, len(pairs) // n_max_topics),
+            n_max_cluster=n_max_topics,
+        )
+        labels, _ = clusterer.fit_predict(subset.document)
+
+        # Group pairs by cluster label
+        cluster_groups: dict[int, list[dict[str, Any]]] = {}
+        for pair, label in zip(pairs, labels):
+            cluster_groups.setdefault(label, []).append(pair)
+    else:
+        # Fallback: use select_cluster_centers (loads models)
+        clusters = select_cluster_centers(
+            character, pairs,
+            n_in_cluster_case=max(min_topic_pairs, len(pairs) // n_max_topics),
+            n_in_cluster_sample=min(8, len(pairs)),
+            n_max_cluster=n_max_topics,
+            bs=8,
+        )
+        cluster_groups = {i: cluster for i, cluster in enumerate(clusters)}
+
+    # Step 2: Filter small clusters
+    valid_clusters = {
+        k: v for k, v in cluster_groups.items()
+        if len(v) >= min_topic_pairs
+    }
+    log.info("Discovered %d clusters (%d valid with >=%d pairs)",
+             len(cluster_groups), len(valid_clusters), min_topic_pairs)
+
+    # Step 3: Label each cluster via LLM
+    topics: list[tuple[str, list[dict[str, Any]]]] = []
+    for cluster_id, cluster_pairs in sorted(valid_clusters.items()):
+        # Sample a few examples for labeling
+        sample = cluster_pairs[:5]
+        examples = "\n\n".join(
+            f"Scene: {p['scene'][:200]}\nAction: {p['action'][:200]}"
+            for p in sample
+        )
+        label_prompt = (
+            f"Given these examples of {character}'s behavior, what specific behavioral "
+            f"theme or pattern do they represent? Answer with a short label (2-5 words) "
+            f"that captures the distinct behavioral mode shown.\n\n"
+            f"Examples:\n{examples}\n\n"
+            f"Label (2-5 words):"
+        )
+        try:
+            label = generate(label_prompt, model=model, max_tokens=20).strip().strip('"\'.')
+        except Exception:
+            label = f"behavioral_cluster_{cluster_id}"
+            log.warning("Topic labeling failed for cluster %d, using default", cluster_id)
+
+        topic_name = f"{character}'s {label.lower()}"
+        topics.append((topic_name, cluster_pairs))
+        log.info("  Topic: %s (%d pairs)", topic_name, len(cluster_pairs))
+
+    return topics

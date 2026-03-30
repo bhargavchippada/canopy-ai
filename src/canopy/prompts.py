@@ -48,6 +48,7 @@ To do this, please propose hypotheses for the general behavior logic of {charact
 - Consider the grounding statements in a general way.
 - The grounding statements should be concise, informative, and general sentences.
 - Never be assertive! Always make objective description of the character rather than making assertive causal relations.
+- IMPORTANT: Include at least one statement about {character}'s ATYPICAL or less frequent reactions (e.g., moments of confusion, hesitation, quiet responses, or subdued behavior). Not every response from {character} follows their dominant pattern.
 
 3. Summarize {k} potential common points of the given scenes that trigger each behavior, **which should be different from already proposed common points.**
 - The question should be simple, not ambiguous, and specific to a subset of scenes rather than always applicable.

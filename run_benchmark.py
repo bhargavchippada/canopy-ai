@@ -270,6 +270,12 @@ GEN_PROMPTS: dict[str, str] = {
         'in the format "{character}: <dialogue>". Keep it under 15 words. '
         'Match the tone and energy level of the scene.'
     ),
+    "dialogue_v3": (
+        "Answer in one short sentence of in-character dialogue. "
+        "Pay attention to the scene's emotional state — if the moment calls for "
+        "confusion, hesitation, or a quiet reaction, respond accordingly rather "
+        "than defaulting to the character's most typical behavior."
+    ),
 }
 
 
