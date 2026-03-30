@@ -161,23 +161,20 @@ def merge_similar_hypotheses(
     gates: list[str],
     statement_candidates: list[str],
     *,
-    similarity_threshold: float = 0.85,
-    embed_fn: Any | None = None,
+    model: str | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Merge semantically duplicate hypothesis pairs via embedding cosine similarity.
+    """Deduplicate hypothesis pairs via a single LLM call.
 
-    Pairs with statement embedding cosine similarity > threshold are deduplicated —
-    the shorter (more concise) statement is kept. This catches semantic duplicates
-    that lexical matching misses (e.g., "lapse into quiet" ≈ "shift from quietness").
+    Sends all hypothesis pairs to the LLM with strict dedup instructions.
+    Returns deduplicated pairs with semantic duplicates merged — the LLM
+    picks the best representative for each group of similar statements.
+
+    One LLM call regardless of input size (vs O(n²) pairwise comparisons).
 
     Args:
         gates: Scene-check hypothesis questions (aligned with statement_candidates).
         statement_candidates: Action hypothesis statements.
-        similarity_threshold: Cosine similarity above which statements are merged.
-            Default 0.85 (embedding space, lower than lexical 0.90 because
-            embeddings capture semantic similarity more precisely).
-        embed_fn: Optional callable (text) → np.ndarray for embedding.
-            If None, uses the LLM to judge similarity instead.
+        model: LLM model for dedup. Uses default if None.
     """
     if len(gates) != len(statement_candidates):
         raise ValueError(
@@ -187,62 +184,69 @@ def merge_similar_hypotheses(
     if len(statement_candidates) <= 1:
         return gates, statement_candidates
 
-    n = len(statement_candidates)
-    merged_into: list[int | None] = [None] * n  # None = keep, int = merged into index
+    # Build numbered list for the LLM
+    pairs_text = "\n".join(
+        f"{i}: action: {stmt} | scene_check: {gate}"
+        for i, (gate, stmt) in enumerate(zip(gates, statement_candidates))
+    )
 
-    if embed_fn is not None:
-        # Embedding-based similarity (preferred)
-        import numpy as np
-        embeddings = np.stack([embed_fn(s) for s in statement_candidates])
-        # Cosine similarity matrix (embeddings assumed L2-normalized)
-        sim_matrix = embeddings @ embeddings.T
+    prompt = f"""# Task: Merge & Deduplicate Hypothesis Pairs
 
-        for i in range(n):
-            if merged_into[i] is not None:
-                continue
-            for j in range(i + 1, n):
-                if merged_into[j] is not None:
-                    continue
-                if float(sim_matrix[i, j]) >= similarity_threshold:
-                    if len(statement_candidates[i]) <= len(statement_candidates[j]):
-                        merged_into[j] = i
-                    else:
-                        merged_into[i] = j
-                        break
-    else:
-        # LLM-based similarity fallback
-        for i in range(n):
-            if merged_into[i] is not None:
-                continue
-            for j in range(i + 1, n):
-                if merged_into[j] is not None:
-                    continue
-                prompt = (
-                    f"Are these two statements about the same behavioral pattern? "
-                    f"Answer only 'yes' or 'no'.\n\n"
-                    f"Statement A: {statement_candidates[i]}\n"
-                    f"Statement B: {statement_candidates[j]}"
-                )
-                try:
-                    answer = generate(prompt, max_tokens=5).strip().lower()
-                    if answer.startswith("yes"):
-                        if len(statement_candidates[i]) <= len(statement_candidates[j]):
-                            merged_into[j] = i
-                        else:
-                            merged_into[i] = j
-                            break
-                except Exception:
-                    pass  # Keep both on failure
+Below are {len(statement_candidates)} hypothesis pairs (index: action | scene_check).
+Merge semantic duplicates into improved combined versions.
 
-    kept_gates = [g for idx, g in enumerate(gates) if merged_into[idx] is None]
-    kept_stmts = [s for idx, s in enumerate(statement_candidates) if merged_into[idx] is None]
+<input_pairs>
+{pairs_text}
+</input_pairs>
 
-    n_merged = sum(1 for m in merged_into if m is not None)
-    if n_merged > 0:
-        log.info("Merged %d/%d semantically duplicate hypotheses (threshold=%.2f)",
-                 n_merged, n, similarity_threshold)
+## Instructions
+1. Group pairs that describe the SAME or OVERLAPPING behavioral pattern
+2. For each group, produce ONE merged pair that combines the best elements from all members:
+   - The merged action hypothesis should be the most precise and complete version
+   - The merged scene_check should be the most discriminative question
+3. Pairs with NO duplicates pass through unchanged
+4. The output should have FEWER pairs than the input (or equal if no duplicates)
+5. Every distinct behavioral pattern from the input must be represented in the output
 
-    return kept_gates, kept_stmts
+## Constraints
+- action: single concise sentence, max 20 words, non-assertive
+- scene_check: single question containing the character's name and "next action"
+
+## Output Format (JSON only)
+```json
+{{"merged_pairs": [
+  {{"scene_check_hypothesis": "...", "action_hypothesis": "..."}},
+  {{"scene_check_hypothesis": "...", "action_hypothesis": "..."}}
+]}}
+```
+
+Return ONLY the JSON."""
+
+    try:
+        response = generate(prompt, model=model)
+        parsed = extract_json(response)
+        merged_pairs = parsed["merged_pairs"]
+
+        if not merged_pairs or not isinstance(merged_pairs, list):
+            log.warning("Merge returned empty/invalid pairs, keeping originals")
+            return gates, statement_candidates
+
+        new_gates = [p["scene_check_hypothesis"] for p in merged_pairs]
+        new_stmts = [p["action_hypothesis"] for p in merged_pairs]
+
+        n_merged = len(statement_candidates) - len(new_stmts)
+        if n_merged > 0:
+            log.info("Merged %d hypotheses → %d via LLM dedup (-%d)",
+                     len(statement_candidates), len(new_stmts), n_merged)
+        elif n_merged < 0:
+            log.warning("LLM produced MORE pairs than input (%d → %d), using originals",
+                        len(statement_candidates), len(new_stmts))
+            return gates, statement_candidates
+
+        return new_gates, new_stmts
+    except (ValueError, KeyError, TypeError) as exc:
+        log.warning("Hypothesis merge failed, keeping all: %s", exc)
+        return gates, statement_candidates
 
 
 def summarize_triggers(
