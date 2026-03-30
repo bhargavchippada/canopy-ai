@@ -95,14 +95,26 @@ Directly answer only yes/no/unknown."""
     return probs
 
 
-def temporal_weight(timestamp: datetime, half_life_days: int = 90) -> float:
-    """Compute time decay weight. Half-life: weight = 0.5 at half_life_days age.
+def temporal_weight(
+    timestamp: datetime,
+    half_life_days: int = 90,
+    *,
+    reference_time: datetime | None = None,
+) -> float:
+    """Compute time decay weight relative to a reference time.
 
-    More recent evidence gets higher weight. Evidence exactly half_life_days old
-    gets weight 0.5. Very old evidence approaches 0 but never reaches it.
+    More recent evidence gets higher weight. Evidence exactly half_life_days
+    before reference_time gets weight 0.5.
+
+    Args:
+        timestamp: When this evidence was observed.
+        half_life_days: Days until weight drops to 0.5.
+        reference_time: The "now" for computing age. Defaults to the current
+            UTC time. For datasets with synthetic timestamps, pass the most
+            recent timestamp in the dataset so weighting is relative.
     """
-    now = datetime.now(timezone.utc)
-    age_days = (now - timestamp).total_seconds() / 86400
+    ref = reference_time or datetime.now(timezone.utc)
+    age_days = (ref - timestamp).total_seconds() / 86400
     if age_days <= 0:
         return 1.0
     return 0.5 ** (age_days / half_life_days)
@@ -205,9 +217,18 @@ def validate_hypothesis(
             character, actions, [hypothesized_action] * len(actions), bs=bs,
         )  # (N, 3) — [false, none, true] per pair
 
+        # Compute reference time from the dataset (most recent timestamp)
+        # so temporal weighting is relative within the dataset, not absolute
+        timestamps = [p.get("_timestamp") for p in filtered_pairs if p.get("_timestamp")]
+        ref_time = max(timestamps) if timestamps else None
+
         for i, pair in enumerate(filtered_pairs):
             ts = pair.get("_timestamp")
-            weight = temporal_weight(ts, time_decay_half_life_days) if ts else 1.0
+            weight = (
+                temporal_weight(ts, time_decay_half_life_days, reference_time=ref_time)
+                if ts and ref_time
+                else 1.0
+            )
             res["False"] += float(per_pair_probs[i, 0]) * weight
             res["None"] += float(per_pair_probs[i, 1]) * weight
             res["True"] += float(per_pair_probs[i, 2]) * weight
