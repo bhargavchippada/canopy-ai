@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from canopy.prompts import merge_similar_hypotheses
 
 
@@ -51,6 +53,16 @@ class TestMergeSimilarHypotheses:
         kept_gates, kept_stmts = merge_similar_hypotheses([], [])
         assert kept_gates == []
         assert kept_stmts == []
+
+    def test_length_mismatch_raises(self) -> None:
+        with pytest.raises(ValueError, match="same length"):
+            merge_similar_hypotheses(["g1"], ["s1", "s2"])
+
+    def test_short_strings(self) -> None:
+        gates = ["g1", "g2"]
+        stmts = ["ab", "ab"]
+        kept_gates, kept_stmts = merge_similar_hypotheses(gates, stmts)
+        assert len(kept_stmts) == 1
 
     def test_custom_threshold(self) -> None:
         gates = ["gate A", "gate B"]

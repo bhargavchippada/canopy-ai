@@ -171,13 +171,20 @@ def merge_similar_hypotheses(
 
     Uses simple character-trigram similarity (no GPU model needed).
     """
+    if len(gates) != len(statement_candidates):
+        raise ValueError(
+            f"gates ({len(gates)}) and statement_candidates ({len(statement_candidates)}) "
+            "must have the same length"
+        )
     if len(statement_candidates) <= 1:
         return gates, statement_candidates
 
     # Compute pairwise similarity using character trigrams (fast, no model)
     def _trigrams(text: str) -> set[str]:
         t = text.lower().strip()
-        return {t[i:i + 3] for i in range(max(1, len(t) - 2))}
+        if len(t) < 3:
+            return {t} if t else set()
+        return {t[i:i + 3] for i in range(len(t) - 2)}
 
     def _jaccard(a: set[str], b: set[str]) -> float:
         if not a or not b:
@@ -201,7 +208,7 @@ def merge_similar_hypotheses(
                     merged_into[j] = i
                 else:
                     merged_into[i] = j
-                    break  # i is now merged, stop comparing it
+                    break  # i merged into j — j continues as representative
 
     kept_gates = [g for idx, g in enumerate(gates) if merged_into[idx] is None]
     kept_stmts = [s for idx, s in enumerate(statement_candidates) if merged_into[idx] is None]

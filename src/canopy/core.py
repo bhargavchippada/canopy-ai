@@ -337,14 +337,17 @@ def build_character_cdts(
 
     # Discovered topics (additional, from data clustering)
     if discover_extra_topics:
-        discovered = discover_topics(
-            character, pairs,
-            embedding_cache=embedding_cache,
-            n_max_topics=n_extra_topics,
-        )
-        for topic_label, topic_pairs in discovered:
-            tasks.append(("attr", topic_label, topic_pairs))
-            log.info("Added discovered topic: %s (%d pairs)", topic_label, len(topic_pairs))
+        try:
+            discovered = discover_topics(
+                character, pairs,
+                embedding_cache=embedding_cache,
+                n_max_topics=n_extra_topics,
+            )
+            for topic_label, topic_pairs in discovered:
+                tasks.append(("attr", topic_label, topic_pairs))
+                log.info("Added discovered topic: %s (%d pairs)", topic_label, len(topic_pairs))
+        except Exception:
+            log.exception("Topic discovery failed — continuing with standard topics only")
 
     for other in other_characters:
         goal_topic = f"{character}'s interaction with {other}"
@@ -474,12 +477,17 @@ def discover_topics(
             f"Label (2-5 words):"
         )
         try:
-            label = generate(label_prompt, model=model, max_tokens=20).strip().strip('"\'.')
+            raw_label = generate(label_prompt, model=model, max_tokens=20)
+            # Sanitize: strip whitespace/quotes/newlines, limit length
+            label = raw_label.strip().strip('"\'.\n\r')
+            label = " ".join(label.split())[:60]  # collapse whitespace, cap length
+            if not label:
+                label = f"behavioral_cluster_{cluster_id}"
         except Exception:
             label = f"behavioral_cluster_{cluster_id}"
             log.warning("Topic labeling failed for cluster %d, using default", cluster_id)
 
-        topic_name = f"{character}'s {label.lower()}"
+        topic_name = "{character}'s {label}".replace("{character}", character).replace("{label}", label.lower())
         topics.append((topic_name, cluster_pairs))
         log.info("  Topic: %s (%d pairs)", topic_name, len(cluster_pairs))
 
