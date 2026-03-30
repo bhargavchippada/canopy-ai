@@ -118,7 +118,7 @@ class CDTNode:
     ) -> None:
         """Build the tree node via hypothesis generation + validation."""
         from canopy.embeddings import select_cluster_centers
-        from canopy.prompts import make_hypotheses_batch, summarize_triggers
+        from canopy.prompts import make_hypotheses_batch, merge_similar_hypotheses, summarize_triggers
         from canopy.validation import validate_hypothesis
 
         _validate = validator or validate_hypothesis
@@ -156,6 +156,8 @@ class CDTNode:
             gate_path,
         )
 
+        # E1: Merge near-duplicate hypotheses before summarization
+        gates, statement_candidates = merge_similar_hypotheses(gates, statement_candidates)
         gates, statement_candidates = _summarize(character, gates, statement_candidates)
         global_statements: list[str] = []
         gated_statements: list[str] = []

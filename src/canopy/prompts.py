@@ -156,6 +156,63 @@ def make_hypotheses_batch(
     return statement_candidates, gates
 
 
+def merge_similar_hypotheses(
+    gates: list[str],
+    statement_candidates: list[str],
+    *,
+    similarity_threshold: float = 0.90,
+) -> tuple[list[str], list[str]]:
+    """Merge near-duplicate hypothesis pairs based on text cosine similarity.
+
+    Pairs with statement cosine similarity > threshold are deduplicated —
+    the shorter (more concise) statement is kept. This reduces redundancy
+    before validation, improving CDT quality by avoiding duplicate gates.
+
+    Uses simple character-trigram similarity (no GPU model needed).
+    """
+    if len(statement_candidates) <= 1:
+        return gates, statement_candidates
+
+    # Compute pairwise similarity using character trigrams (fast, no model)
+    def _trigrams(text: str) -> set[str]:
+        t = text.lower().strip()
+        return {t[i:i + 3] for i in range(max(1, len(t) - 2))}
+
+    def _jaccard(a: set[str], b: set[str]) -> float:
+        if not a or not b:
+            return 0.0
+        return len(a & b) / len(a | b)
+
+    trigrams = [_trigrams(s) for s in statement_candidates]
+    n = len(statement_candidates)
+    merged_into: list[int | None] = [None] * n  # None = keep, int = merged into index
+
+    for i in range(n):
+        if merged_into[i] is not None:
+            continue
+        for j in range(i + 1, n):
+            if merged_into[j] is not None:
+                continue
+            sim = _jaccard(trigrams[i], trigrams[j])
+            if sim >= similarity_threshold:
+                # Keep the shorter (more concise) statement
+                if len(statement_candidates[i]) <= len(statement_candidates[j]):
+                    merged_into[j] = i
+                else:
+                    merged_into[i] = j
+                    break  # i is now merged, stop comparing it
+
+    kept_gates = [g for idx, g in enumerate(gates) if merged_into[idx] is None]
+    kept_stmts = [s for idx, s in enumerate(statement_candidates) if merged_into[idx] is None]
+
+    n_merged = sum(1 for m in merged_into if m is not None)
+    if n_merged > 0:
+        log.info("Merged %d/%d near-duplicate hypotheses (threshold=%.2f)",
+                 n_merged, n, similarity_threshold)
+
+    return kept_gates, kept_stmts
+
+
 def summarize_triggers(
     character: str,
     gates: list[str],
