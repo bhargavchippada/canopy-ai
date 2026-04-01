@@ -249,7 +249,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--gen_prompt",
         type=str,
-        choices=["narration", "dialogue", "dialogue_v2"],
+        choices=["narration", "dialogue", "dialogue_v2", "dialogue_v3"],
         default="dialogue",
         help=(
             "Gen prompt style: 'narration' (paper original), "

@@ -52,6 +52,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    default=str(Path.home() / "models" / "deberta-v3-base-rp-nli"))
     p.add_argument("--device_id", type=int, default=0)
     p.add_argument("--engine", default="claude-haiku-4-5")
+    p.add_argument("--falsifiability_gen", action="store_true",
+                   help="Add falsifiability constraints to hypothesis gen prompt")
+    p.add_argument("--skip_compress", action="store_true",
+                   help="Skip LLM compression in summarize step (truncate to 8)")
     return p.parse_args(argv)
 
 
@@ -197,7 +201,8 @@ def step_hypothesis_gen(character: str, cache_path: Path, **kwargs: Any) -> dict
 
     _init_llm(kwargs.get("engine", "claude-haiku-4-5"))
     statements, gates = canopy_prompts.make_hypotheses_batch(
-        clusters, character, f"{character}'s identity", [], [])
+        clusters, character, f"{character}'s identity", [], [],
+        falsifiability_constraints=kwargs.get("falsifiability_gen", False))
 
     result = {"gates": gates, "statements": statements}
     atomic_write(cache_path / "hypothesis_gen" / "hypotheses.json", json.dumps(result, indent=2))
@@ -241,10 +246,12 @@ def step_compress(character: str, cache_path: Path, **kwargs: Any) -> dict:
 
     hyp_data = load_json(hyp_path)
     pairs = load_json(pairs_path)
-    _init_llm(kwargs.get("engine", "claude-haiku-4-5"))
-
+    skip = kwargs.get("skip_compress", False)
+    if not skip:
+        _init_llm(kwargs.get("engine", "claude-haiku-4-5"))
     gates_out, stmts_out = canopy_prompts.summarize_triggers(
-        character, hyp_data["gates"], hyp_data["statements"])
+        character, hyp_data["gates"], hyp_data["statements"],
+        compress=not skip)
     atomic_write(cache_path / "compress" / "hypotheses.json",
                  json.dumps({"gates": gates_out, "statements": stmts_out}, indent=2))
     log.info("Compressed to %d hypothesis pairs", len(stmts_out))
@@ -274,12 +281,12 @@ def step_validate(character: str, cache_path: Path, **kwargs: Any) -> dict:
 
     for gate, stmt in zip(hyp_data["gates"], hyp_data["statements"]):
         res, filtered = canopy_validation.validate_hypothesis(character, pairs, gate, stmt)
-        true_score = res.get("True", 0)
-        false_score = res.get("False", 0)
+        true_score = float(res.get("True", 0))
+        false_score = float(res.get("False", 0))
         denom = true_score + false_score
-        correctness = float(true_score / (denom + 1e-8)) if denom > 0 else 0.0
-        total_score = sum(res.values())
-        broadness = 1 - res.get("Irrelevant", 0) / (total_score + 1e-8) if total_score > 0 else 0.0
+        correctness = true_score / (denom + 1e-8) if denom > 0 else 0.0
+        total_score = float(sum(res.values()))
+        broadness = 1 - float(res.get("Irrelevant", 0)) / (total_score + 1e-8) if total_score > 0 else 0.0
         correctness_values.append(correctness)
         status = "accepted" if correctness >= 0.8 else ("rejected" if correctness < 0.5 else "gated")
         counts[status] += 1
@@ -287,7 +294,7 @@ def step_validate(character: str, cache_path: Path, **kwargs: Any) -> dict:
             "gate": gate, "statement": stmt,
             "correctness": round(correctness, 4), "broadness": round(broadness, 4),
             "status": status, "n_filtered": len(filtered),
-            "scores": {k: round(v, 4) for k, v in res.items()},
+            "scores": {k: round(float(v), 4) for k, v in res.items()},
         })
 
     atomic_write(cache_path / "validate" / "results.json", json.dumps(results_list, indent=2))
@@ -319,9 +326,24 @@ def step_build_tree(character: str, cache_path: Path, **kwargs: Any) -> dict:
             band_members = [m for m in members if m != character]
             break
 
+    import torch
     _init_llm(kwargs.get("engine", "claude-haiku-4-5"))
+    device_id = kwargs.get("device_id", 0)
+    device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")
+    canopy_validation.init_models(kwargs.get("discriminator_path",
+        str(Path.home() / "models" / "deberta-v3-base-rp-nli")), device)
+    # Build custom hypothesis/summarize functions if experiment flags are set
+    build_kwargs: dict[str, Any] = {"embedding_cache": emb_cache}
+    if kwargs.get("falsifiability_gen", False):
+        from functools import partial
+        build_kwargs["hypothesis_fn"] = partial(
+            canopy_prompts.make_hypotheses_batch, falsifiability_constraints=True)
+    if kwargs.get("skip_compress", False):
+        from functools import partial
+        build_kwargs["summarize_fn"] = partial(
+            canopy_prompts.summarize_triggers, compress=False)
     topic2cdt, rel_topic2cdt = canopy_core.build_character_cdts(
-        character, indexed_pairs, band_members, embedding_cache=emb_cache)
+        character, indexed_pairs, band_members, **build_kwargs)
 
     out_dir = cache_path / "build_tree"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -380,6 +402,8 @@ def main() -> None:
         "generator_embedder_path": args.generator_embedder_path,
         "discriminator_path": args.discriminator_path,
         "device_id": args.device_id, "engine": args.engine,
+        "falsifiability_gen": args.falsifiability_gen,
+        "skip_compress": args.skip_compress,
     }
     if args.step == "all":
         for step_name, step_fn in ORDERED_STEPS:

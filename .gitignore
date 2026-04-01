@@ -50,3 +50,9 @@ profiles/*.txt
 
 # Benchmark results (generated)
 results/
+
+# CDT build cache (generated at runtime)
+cache/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/

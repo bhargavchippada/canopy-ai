@@ -13,7 +13,32 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 **Phase 2: COMPLETE** — Library API: BehavioralObservation, builder, wikify, cluster.
 **Phase 3: COMPLETE** — Integration tests (11 GPU tests), examples, README.
 **Phase 4: COMPLETE** — All legacy files migrated (zero OpenAI/exec/constant refs), batch LLM, parallel benchmark.
-**Next:** Phase 5 (T-CDT + Advanced Features) or delulu integration.
+**Phase 5: IN PROGRESS** — T-CDT temporal weighting, E7 episodic memory (CDT-guided RAG), E1 hypothesis merge (LLM semantic dedup), E4 topic discovery, contrastive hypothesis generation, gen prompt templates.
+
+### Key Findings (Session 8)
+- **70.66 is a local maximum** for Kasumi RP with Sonnet eval — every additional signal (temporal, RAG, format constraints, more CDT text, relationships) hurts
+- **Contrastive hypotheses** surface non-dominant behaviors (confusion, hesitation) but deeper trees over-discriminate
+- **Hypothesis merge** now uses single LLM call for semantic dedup (not word-based matching)
+- **PersonaMem 32k vs 128k**: our 76.9% is not comparable to paper's 50% (different splits)
+- **T-CDT**: temporal weighting works but not for consistent characters (Bandori); good for evolving personas (delulu)
+
+### Key Findings (Session 9)
+- **CDT builds are NON-DETERMINISTIC**: same config rebuilt = 60.30 vs original 70.66 (10-pt variance). LLM hypothesis gen produces different trees each time. All A/B benchmark comparisons MUST use the SAME CDT pickle, not rebuilt CDTs.
+- **--no_merge flag** added to `codified_decision_tree.py` to control hypothesis dedup (skip the LLM merge step)
+- **Retry logic** added to `build_character_cdts()` for transient LLM failures during parallel topic construction
+
+### Key Findings (Session 10)
+- **Step pipeline solves reproducibility**: 3 identical builds → NLI scores 70.36, 68.86, 71.26 (mean=70.16, std=0.99). Caching deterministic steps isolates variance to hypothesis gen + dedup only. 10x improvement over session 9's 10-pt variance.
+- **Tree structure varies 2x but NLI barely moves**: nodes=[36,39,61], stmts=[84,82,120] across 3 builds, yet NLI std=0.99. Bigger trees don't help — optimize hypothesis quality, not quantity.
+- **Dedup is the key variance source**: LLM merge reduces 24→7 or 24→14 hypotheses depending on run. Deterministic dedup (DeBERTa entailment) would eliminate this variance.
+- **Provenance system added**: Provenance, TrackedHypothesis, HypothesisQuality dataclasses in `canopy.provenance`. CDTNode extended with statement_provenance, gate_provenance, hypothesis_quality + get_evidence()/traverse_with_evidence(). Old pickles backward-compatible via __setstate__.
+- **check_statement_pair_entailment()** added to validation.py — computes grounding fidelity (mean NLI True probability of statement against source actions)
+
+### Conventions Discovered (Session 10 continued)
+- **`step_build_tree` must init DeBERTa**: `build_character_cdts()` calls `validate_hypothesis()` internally, which requires `canopy.validation.init_models()`. Any step or script calling `build_character_cdts` must init the validation model first.
+- **Never run 3+ `build_character_cdts` in parallel**: Each build spawns `max_parallel` threads, each making batch LLM calls. 3 concurrent builds = 90+ simultaneous claude-agent-sdk subprocesses → API rate limits and fatal errors. Run builds sequentially or use `max_parallel=1-2`.
+- **Cast numpy float32 before JSON serialization**: `validate_hypothesis()` returns numpy float32 values. Always `float(v)` before passing to `json.dumps()`.
+- **`build_character_cdts` now accepts `hypothesis_fn` and `summarize_fn`**: Custom hypothesis generation and summarization functions can be injected for experiments without modifying the default code path.
 
 ## Design Reference
 
@@ -43,9 +68,12 @@ Canopy extends Codified Decision Trees (CDT) with temporal dynamics, structured 
 
 ```python
 from canopy import BehavioralObservation, CDTConfig, build_cdt, build_character_profile
+from canopy import EpisodicIndex, hybrid_ground, GroundingResult  # E7: CDT-guided RAG
 from canopy.wikify import wikify_tree, wikify_profile
+from canopy.episodic import format_grounding  # Prompt-ready grounding text
 from canopy.llm import ClaudeCodeAdapter, set_adapter
 from canopy.cluster import KMeansCluster, HDBSCANCluster
+from canopy.validation import temporal_weight  # T-CDT time decay
 
 # 1. Configure LLM
 set_adapter(ClaudeCodeAdapter(default_model="claude-haiku-4-5"))
@@ -97,6 +125,17 @@ uv run python codified_decision_tree.py \
   --cluster_method kmeans \
   --device_id 0
 
+# CDT construction without hypothesis merge (skip LLM dedup step)
+uv run python codified_decision_tree.py \
+  --character Kasumi \
+  --engine claude-haiku-4-5 \
+  --no_merge \
+  --surface_embedder_path ~/models/Qwen3-Embedding-0.6B \
+  --generator_embedder_path ~/models/Qwen3-0.6B \
+  --discriminator_path ~/models/deberta-v3-base-rp-nli \
+  --cluster_method kmeans \
+  --device_id 0
+
 # Benchmark with parallel evaluation
 uv run python run_benchmark.py \
   --character Kasumi \
@@ -127,7 +166,7 @@ Models stored in `~/models/`:
 
 ```
 canopy-ai/
-├── src/canopy/                # Core package (12 modules)
+├── src/canopy/                # Core package (13 modules)
 │   ├── __init__.py            # Exports: CDTConfig, CDTNode, BehavioralObservation, EmbeddingCache
 │   ├── core.py                # CDTNode, CDTConfig, build_character_cdts
 │   ├── builder.py             # BehavioralObservation, build_cdt, build_character_profile
@@ -137,9 +176,14 @@ canopy-ai/
 │   ├── _embed_worker.py       # Subprocess entry point for VRAM-isolated encoding
 │   ├── validation.py          # NLI-based scene/statement checking (DeBERTa)
 │   ├── prompts.py             # LLM hypothesis generation + summarization
+│   ├── quality.py             # Pure metric functions (no GPU/LLM): data, clustering, hypothesis, tree quality
 │   ├── llm.py                 # LLM adapter (Protocol + ClaudeCodeAdapter + batch_generate)
 │   ├── data.py                # HuggingFace dataset loading + caching
 │   └── cli.py                 # CLI entry point
+├── scripts/                   # CLI tools
+│   └── cdt_steps.py           # Step-by-step CDT pipeline with caching + quality metrics
+├── notebooks/                 # Interactive exploration
+│   └── cdt_step_by_step.ipynb # 12-cell Colab: t-SNE, quality tables, tree viz (D17: zero pipeline logic)
 ├── tests/                     # Unit + integration tests
 │   ├── conftest.py            # GPU skip guard, integration deselection
 │   ├── test_core.py           # CDTNode, CDTConfig, build_character_cdts, cache forwarding
@@ -150,6 +194,8 @@ canopy-ai/
 │   ├── test_data.py           # Metadata loading, pair extraction
 │   ├── test_embeddings.py     # EmbeddingCache, precompute, subprocess, cache path
 │   ├── test_validation.py     # Guard tests
+│   ├── test_quality.py        # Pure metric function tests (100% coverage)
+│   ├── test_cdt_steps.py      # Step pipeline CLI tests (99% coverage)
 │   └── test_integration.py    # GPU tests (embeddings, validation, pipeline)
 ├── examples/                  # Usage examples
 │   └── quickstart.py

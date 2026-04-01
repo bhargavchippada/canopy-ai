@@ -1,0 +1,402 @@
+[
+  {
+    "index": 0,
+    "scene": "...nks to you, Kasumi.\nArisa: I was more dragged against my will, but still.\nSaaya: We can never forget what's most important of all. That we are all here together.\nKasumi: Yes! I love you all so much~\u266a\nArisa: She's gone past crazy into creepy, now.\nTae: You're blushing.\nRimi: I feel like we're all closer than ever before.\nSaaya: I hope we get to feel like this a lot more in future, too.\nKasumi: Let's make every day more exciting than the last!\nArisa: Not every day, please. I don't need the stress.",
+    "ground_truth": "Kasumi: Come on~! We're talking about fun~! Lots and lots of happy, chatty fun~\u266a",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi laughs off Arisa's protest and spins toward her with a bright, irrepressible grin, hooking her arm through Arisa's and declaring that *she* is exactly why every day is worth getting excited about."
+  },
+  {
+    "index": 4,
+    "scene": "Rimi: I know it will be tough, but I don't want to give up.\nArisa: Even so, it does look pretty much impossible...\nKasumi: Hrm... What should we do...?\nRimi: Something only we can do...\nTae: Hmm... Tough one.\nSaaya: It's not easy changing someone's mind when they're already so decided on something...\nKasumi: ... I've got it!\nArisa: Veto.\nKasumi: But I haven't even explained it yet!\nArisa: Sorry, just a natural reflex. ... Well go on, then.",
+    "ground_truth": "Kasumi: Okay, so! We have to express these feelings the only way we can, right?",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi straightens up with bright, barely-contained energy and launches into her idea with both hands gesturing, eager eyes sweeping across each bandmate's face as she spills it all out at once."
+  },
+  {
+    "index": 6,
+    "scene": "Tae: Hmm... Tough one.\nSaaya: It's not easy changing someone's mind when they're already so decided on something...\nKasumi: ... I've got it!\nArisa: Veto.\nKasumi: But I haven't even explained it yet!\nArisa: Sorry, just a natural reflex. ... Well go on, then.\nKasumi: Okay, so! We have to express these feelings the only way we can, right?\nTae: The only way we can.\nKasumi: With a performance! We can perform for all the community and the city hall people, too!\nArisa, Rimi, Tae & Saaya: Perform?",
+    "ground_truth": "Kasumi: It's what we do best! We can express our true feelings through song!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi throws her arms wide with a beaming grin, urging her bandmates forward with an energetic declaration that this is exactly what Poppin' Party was made for."
+  },
+  {
+    "index": 10,
+    "scene": "...ce... I suppose it could be a little fun.\nKasumi: What do you think? ... Can we do it?\nTae: I think we should try.\nSaaya: I agree. If only just to see how another Kasumi's plan turns out.\nRimi: It was a burst of inspiration from Kasumi-chan that formed our band in the first place, after all.\nArisa: Just promise me you won't go crazy trying to do everything at once, like you always do.\nKasumi: Arisa~!\nArisa: And promise to get off of me, too! ... I'll just have to keep an eye on you myself, then.",
+    "ground_truth": "Kasumi: Thank you, everyone! We finally got a plan together!!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi beams at Arisa with barely contained delight, throwing her arms around her and declaring that with everyone on board, they're going to make the most incredible live performance ever."
+  },
+  {
+    "index": 11,
+    "scene": "...t?\nTae: I think we should try.\nSaaya: I agree. If only just to see how another Kasumi's plan turns out.\nRimi: It was a burst of inspiration from Kasumi-chan that formed our band in the first place, after all.\nArisa: Just promise me you won't go crazy trying to do everything at once, like you always do.\nKasumi: Arisa~!\nArisa: And promise to get off of me, too! ... I'll just have to keep an eye on you myself, then.\nKasumi: Thank you, everyone! We finally got a plan together!!\n[Scene: After School]",
+    "ground_truth": "Kasumi: School's out! Time to go find Arisa!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi, still riding the wave of collective excitement, immediately turns to her bandmates with a bright, eager grin and declares it's time to get started on practice right away."
+  },
+  {
+    "index": 12,
+    "scene": "...urns out.\nRimi: It was a burst of inspiration from Kasumi-chan that formed our band in the first place, after all.\nArisa: Just promise me you won't go crazy trying to do everything at once, like you always do.\nKasumi: Arisa~!\nArisa: And promise to get off of me, too! ... I'll just have to keep an eye on you myself, then.\nKasumi: Thank you, everyone! We finally got a plan together!!\n[Scene: After School]\nKasumi: School's out! Time to go find Arisa!\nSaaya: Didn't she tell you to wait here for her?",
+    "ground_truth": "Kasumi: I'll be back soon~\u266a",
+    "sonnet_score": "C",
+    "human_score": null,
+    "prediction": "Kasumi freezes mid-step, laughs off her mistake, and wheels back around with a bright \"Oh right!\" to wait \u2014 though she's already bouncing on her heels with barely contained energy."
+  },
+  {
+    "index": 13,
+    "scene": "Saaya: Didn't she tell you to wait here for her?\nKasumi: I'll be back soon~\u266a\nTae: Bring back souvenirs.\nRimi: She disappeared...\nSaaya: It couldn't be more obvious how excited she is to get back downtown.\nRimi: Today is the day we ask for permission to perform live. I'm a little nervous myself.\nTae: Nervous. But excited.\nSaaya: We have to be brave. We need to get our feelings heard.\nTae: I'm filling up with motivation already.\nRimi: I just hope it all goes well...",
+    "ground_truth": "Kasumi: I'm back~! Here's your souvenir - Arisa\u266a",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi bursts back in, eyes shining, and throws her arms wide as she declares that today is the day Poppin'Party takes its first big step toward that sparkling stage \u2014 so everyone had better be fired up and ready to go!"
+  },
+  {
+    "index": 22,
+    "scene": "...at the festival. Would you please put it back on?\nPeople: Nothing would please us more. But I'm afraid it's simply not possible...\n[Scene: Downtown]\nRimi: Please! If you say it's impossible, we'll have to give up!\nSaaya: There are a lot of people looking forward to this festival. None of us want it to be canceled.\nArisa: If you let us perform, we promise to make this year's festival the most amazing one yet.\nTae: We'll give it 110%.\nRimi: We won't let you down! Just, please, give us a chance...!",
+    "ground_truth": "Kasumi: Everyone, please! Let us perform for you!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi throws her arms out and cries out with blazing conviction, \"We *can't* give up \u2014 not when everyone's counting on us and we still have music left to play!\""
+  },
+  {
+    "index": 23,
+    "scene": "...want it to be canceled.\nArisa: If you let us perform, we promise to make this year's festival the most amazing one yet.\nTae: We'll give it 110%.\nRimi: We won't let you down! Just, please, give us a chance...!\nKasumi: Everyone, please! Let us perform for you!\nMan: To be asked with such passion from young girls such as you.\nPeople: We all want to see the festival go on as planned, too.\nMan: ... Okay. If you wouldn't mind it being a relatively small affair, we can hold the festival again this year.",
+    "ground_truth": "Kasumi: Really?!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi bursts into an elated cheer, throwing her arms wide as she turns to her bandmates and declares that they're going to make this the best festival ever!"
+  },
+  {
+    "index": 24,
+    "scene": "....\nMan: ... Okay. If you wouldn't mind it being a relatively small affair, we can hold the festival again this year.\nKasumi: Really?!\nRimi: Thank you so much! Ah, but... the budget...\nMan: You just leave the finances to us!\nSaaya: And what about next year...?\nPeople: Without designated funding from the city, next year will be an impossible stretch without doubt.\nMan: But if we can put on a real show this year and gather all manner of people, perhaps the city suits will finally change their minds.",
+    "ground_truth": "Kasumi: So this is our final chance!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi throws her fists in the air and cries out that they're absolutely going to make this the best festival ever, one that'll change everyone's minds for good!"
+  },
+  {
+    "index": 25,
+    "scene": "...mpossible stretch without doubt.\nMan: But if we can put on a real show this year and gather all manner of people, perhaps the city suits will finally change their minds.\nKasumi: So this is our final chance!\nTae: Lots of pressure. But we won't give in.\nArisa: Are you kidding? We'll make this the best festival anyone's ever seen.\nSaaya: Thank you all so much for your help!\nPeople: We're counting on you. And we'll all be looking forward to your performance.\nAll: Okay!\nSaaya: Thanks again, everyone.",
+    "ground_truth": "Kasumi: ... We did it!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi throws her arms around her bandmates with a beaming grin, declaring that this is exactly the kind of moment that makes being in a band together mean everything."
+  },
+  {
+    "index": 28,
+    "scene": "...re there to support me.\nArisa: You were great. We all were.\nSaaya: This is just the beginning, though.\nArisa: I hope you understand what this means, Kasumi.\nKasumi: Huh? What what means?\nArisa: If this festival isn't perfect, there won't be another one. Ever.\nRimi: He did say this was our last chance... Are we really sure we can do it?\nSaaya: I think the folks at the community center are going to be paying out of pocket... We cannot let them down.\nTae: We've come this far. We have to keep going.",
+    "ground_truth": "Kasumi: We can do it!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi pumps her fist and declares that there's no way Poppin'Party is going to let this festival fail \u2014 not after everything they've all fought for together."
+  },
+  {
+    "index": 29,
+    "scene": "...Arisa: I hope you understand what this means, Kasumi.\nKasumi: Huh? What what means?\nArisa: If this festival isn't perfect, there won't be another one. Ever.\nRimi: He did say this was our last chance... Are we really sure we can do it?\nSaaya: I think the folks at the community center are going to be paying out of pocket... We cannot let them down.\nTae: We've come this far. We have to keep going.\nKasumi: We can do it!\nArisa: Easier said than done. This is a whole festival we're talking about here.",
+    "ground_truth": "Kasumi: And I know we can do it\u266a With all of us working together it'll be no problem!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi turns to face the group with bright, undimmed eyes and insists that they've already proven they can, that giving up now would mean letting down everyone who believes in them."
+  },
+  {
+    "index": 32,
+    "scene": "...With all of us working together it'll be no problem!\nSaaya: It's like Rimi-rin said. It's something only we five can do.\nKasumi: Exactly! There's no way I could do this all by myself\u266a\nTae: Teamwork made this happen.\nRimi: Now we know the festival is coming back, next we need to focus on our performance!\nArisa: It's not like we have any choice any more.\nTae: Time for another strategy meeting?\nKasumi: Great idea! Let's strategize!\nSaaya: We've still got some time left. Let's go somewhere to think.",
+    "ground_truth": "Kasumi: Let's go, let's go\u266a",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi energetically leads the way, likely humming or singing as she urges everyone to follow her somewhere they can plan together."
+  },
+  {
+    "index": 34,
+    "scene": "Tae: Time for another strategy meeting?\nKasumi: Great idea! Let's strategize!\nSaaya: We've still got some time left. Let's go somewhere to think.\nKasumi: Let's go, let's go\u266a\n[Scene: Hazawa Coffee]\nKasumi: Wow~\u266a\nSaaya: This place has the best chiffon cake.\nRimi: They're all homemade, too. Delicious\u266a\nArisa: ... I guess it's not bad. The five of us out together like this.\nTae: Our own happy moment...",
+    "ground_truth": "Kasumi: Ogeh, leff ftar duh hftraferdy eedin~!",
+    "sonnet_score": "C",
+    "human_score": null,
+    "prediction": "Kasumi beams at Arisa and the others, throwing her arms out and exclaiming that this is exactly what makes Poppin'Party so special \u2014 the five of them together!"
+  },
+  {
+    "index": 36,
+    "scene": "[Scene: Hazawa Coffee]\nKasumi: Wow~\u266a\nSaaya: This place has the best chiffon cake.\nRimi: They're all homemade, too. Delicious\u266a\nArisa: ... I guess it's not bad. The five of us out together like this.\nTae: Our own happy moment...\nKasumi: Ogeh, leff ftar duh hftraferdy eedin~!\nArisa: Nope. Didn't catch a word. Eat or speak, pick one.\nKasumi: Sorry, sorry. They're just too good to stop. Okay, let's start the strategy meeting~!\nArisa: Right. Go on then.",
+    "ground_truth": "Kasumi: We can't just get up there and start playing. We have to do all kinds of preparation first!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi beams at each of her bandmates in turn, pumping her fist with bright-eyed energy as she declares that Poppin'Party is going to take on whatever comes next together."
+  },
+  {
+    "index": 37,
+    "scene": "...top. Okay, let's start the strategy meeting~!\nArisa: Right. Go on then.\nKasumi: We can't just get up there and start playing. We have to do all kinds of preparation first!\nSaaya: We should plan it all out, step by step.\nTae: So we don't get all in a panic later on.\nArisa: Wait, wait. I'll take notes. So we check our instruments, then go on stage...\nRimi: Should we talk a little before we start playing?\nArisa: With the audience, you mean? We'll need to decide where to stand and what to say, then.",
+    "ground_truth": "Kasumi: Oh, oh! And we should sparkle, and twinkle, and shine!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi springs upright with a burst of energy, declaring that they should each introduce themselves and shout out how pumped they are to be there together."
+  },
+  {
+    "index": 48,
+    "scene": "...\nTae: To the mountains!\nArisa: That's not what I meant! I mean how are we going to organize something like this?\nSaaya: Hmm. Even if we booked a place right now, we still wouldn't get everything prepared in time...\nRimi: It'll cost us a lot of money, too...\nKasumi: Hrm... You're right. ... We could get jobs?\nSaaya: The whole problem is we don't have enough time. We can't spend what time we have working, can we?\nRimi: That is a shame... I was looking forward to going away together...\nTae: Me too.",
+    "ground_truth": "Kasumi: Hrm... We need somewhere close by and open. Somewhere that won't cost us any money.",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi, refusing to let the group's deflation settle, turns to the others with a burst of renewed energy and declares that they'll find a way no matter what, because giving up on going away together isn't an option."
+  },
+  {
+    "index": 52,
+    "scene": "Arisa: Well that's just impossible, so there's no point even thinking.\nKasumi: ... I've got it! I know where we can go!\nRimi: R-really? Where?\nKasumi: Here! Arisa's house!\nArisa: Hah. ... Wait, you're serious?!\nSaaya: I dunno... I think it's a good idea.\nArisa: Huh?\nTae: It fits all the specs. Close, open, big, soundproof.\nSaaya: All we need now is her family's permission.\nArisa: Wh-what...?",
+    "ground_truth": "Kasumi: Please, Arisa!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi turns to Arisa with bright, eager eyes and clasps her hands together, beaming as she declares that it's decided and that they're counting on her."
+  },
+  {
+    "index": 54,
+    "scene": "Saaya: I dunno... I think it's a good idea.\nArisa: Huh?\nTae: It fits all the specs. Close, open, big, soundproof.\nSaaya: All we need now is her family's permission.\nArisa: Wh-what...?\nKasumi: Please, Arisa!\nRimi: Arisa-chan! Please!\nArisa: Stop with the begging! It's not making this any easier...\nKasumi: Aww~...\nArisa: ......! Okay, fine! Fine! If there's really no other option... I'll go ask my grandma.",
+    "ground_truth": "Kasumi: You will?!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi bursts into an elated exclamation, likely throwing her arms around Arisa or lunging toward her with an affectionate, over-the-top display of gratitude."
+  },
+  {
+    "index": 58,
+    "scene": "Saaya: ... I think we can get our hopes up a little. Fufu.\nTae: Arisa's too kind.\nKasumi: She is! She really is!\nArisa: Enough with all that! Flattery will get you nowhere!\n[Scene: Arisa's House - Basement]\nSaaya: Arisa didn't come to school again today.\nKasumi: I wonder what her grandma said about the retreat... Oh, I just got a message from her! \"Come to Hazawa Coffee. Bring the others.\"\nRimi: I wonder what it could be...\n[Scene: The Next Day]\nArisa: There you are.",
+    "ground_truth": "Kasumi: Arisa! How did it go...?",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi rushes toward Arisa with a bright, eager smile, exclaiming something like \"Arisa!\" as she closes the distance between them, her whole demeanor radiating both relief and excitement at finally seeing her again."
+  },
+  {
+    "index": 59,
+    "scene": "Arisa: Enough with all that! Flattery will get you nowhere!\n[Scene: Arisa's House - Basement]\nSaaya: Arisa didn't come to school again today.\nKasumi: I wonder what her grandma said about the retreat... Oh, I just got a message from her! \"Come to Hazawa Coffee. Bring the others.\"\nRimi: I wonder what it could be...\n[Scene: The Next Day]\nArisa: There you are.\nKasumi: Arisa! How did it go...?\n[Scene: Hazawa Coffee]\nArisa: Here.",
+    "ground_truth": "Kasumi: ... Wah! What is it? A key?",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi snatches up whatever Arisa hands over and immediately bursts into an unrestrained exclamation as she registers what it means for the band."
+  },
+  {
+    "index": 62,
+    "scene": "Kasumi: Arisa! How did it go...?\n[Scene: Hazawa Coffee]\nArisa: Here.\nKasumi: ... Wah! What is it? A key?\nArisa: This weekend. Saturday and Sunday.\nKasumi: Huh...?\nArisa: You're the one in charge, so you take the key. Don't come crying to me if something happens.\nKasumi: ...!\nRimi: Does that mean...?\nArisa: ... Just make sure you don't disturb the neighbors.",
+    "ground_truth": "Kasumi: ... Ya~y! We got our retreat~!!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi lets out an overwhelmed, ecstatic exclamation and throws herself at Arisa in a grateful, affectionate tackle."
+  },
+  {
+    "index": 66,
+    "scene": "...you come over.\nTae: It's a retreat.\nKasumi: Exactly! A retreat! It's not like our normal hangout, is it?!\nArisa: Loud, too loud... At least you're not being rude, I guess.\nMami: Welcome, welcome. Please, enjoy your stay.\nKasumi: Ah, Arisa's grandma! Thanks so much for letting us stay here!\nMami: Oh, don't mention it. I'll bring you some drinks down to the basement. Is juice okay?\nArisa: You don't have to wait on us, grandma. Come on, let's get started. You brought the basement key, right leader?",
+    "ground_truth": "Kasumi: Sure did! It's right... erm... huh...",
+    "sonnet_score": "C",
+    "human_score": null,
+    "prediction": "Kasumi throws her fist into the air and announces that yes, she's got it, brandishing the key with a beaming grin as she declares it's time to get this retreat started!"
+  },
+  {
+    "index": 70,
+    "scene": "Rimi: Ah...?\nKasumi: Oh wait, wrong pocket! Here it is! Phew~!\nTae: My heart skipped a beat.\nArisa: ... You're lucky you found it...\n[Scene: Arisa's House]\nSaaya: Okay then. Let's start with the lyrics. I suppose we'll just brainstorm ideas together first?\nKasumi: Okay! Well, it's a town festival, right? So we should include stuff about the town!\nArisa: A surprisingly good idea.\nKasumi: Fufu~\u266a\nRimi: I'm... not sure how we can sing about the town, though...",
+    "ground_truth": "Kasumi: Huh? Oh, hrm...\u266a Kitazawa Butcher's croquettes~\u266a Hot, crunchy and oh-so delicious~\u266a Each one just 86 yen plus tax~\u266a",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi launches into an enthusiastic, off-the-cuff example, humming or half-singing a made-up line about a familiar local landmark to show Rimi exactly what she means."
+  },
+  {
+    "index": 71,
+    "scene": "...isa's House]\nSaaya: Okay then. Let's start with the lyrics. I suppose we'll just brainstorm ideas together first?\nKasumi: Okay! Well, it's a town festival, right? So we should include stuff about the town!\nArisa: A surprisingly good idea.\nKasumi: Fufu~\u266a\nRimi: I'm... not sure how we can sing about the town, though...\nKasumi: Huh? Oh, hrm...\u266a Kitazawa Butcher's croquettes~\u266a Hot, crunchy and oh-so delicious~\u266a Each one just 86 yen plus tax~\u266a\nSaaya: Haha. I think that's more a commercial than a song.",
+    "ground_truth": "Kasumi: ... No good?",
+    "sonnet_score": "C",
+    "human_score": null,
+    "prediction": "Kasumi laughs off Saaya's teasing without a hint of embarrassment, then energetically doubles down, insisting that singing about the things they all love in the town is exactly the right direction for the song."
+  },
+  {
+    "index": 72,
+    "scene": "...ng about the town, though...\nKasumi: Huh? Oh, hrm...\u266a Kitazawa Butcher's croquettes~\u266a Hot, crunchy and oh-so delicious~\u266a Each one just 86 yen plus tax~\u266a\nSaaya: Haha. I think that's more a commercial than a song.\nKasumi: ... No good?\nTae: I liked it.\nArisa: Nope, no good at all. I can already picture that city suit's smug face. We're gonna need something better than that.\nRimi: Something better... Maybe a more serious topic...?\nTae: Love.\nKasumi, Arisa, Saaya & Rimi: Love?!\nTae: Of all humankind.",
+    "ground_truth": "Kasumi: Too serious!",
+    "sonnet_score": "C",
+    "human_score": null,
+    "prediction": "Kasumi bursts out with an enthusiastic, unrestrained exclamation of agreement, declaring that love for all of humankind is exactly the kind of grand, heartfelt theme their song needs."
+  },
+  {
+    "index": 75,
+    "scene": "... be what makes them truly happy, too.\nKasumi: Something relatable... to make a happy festival... Hrm...\n[Scene: Arisa's House - Basement]\nSaaya: ... Wow. It's getting dark already. How do we look, Kasumi?\nKasumi: Mmm... It's not looking good.\nTae: The melody is coming along.\nRimi: I'm sorry, Kasumi-chan. We all got so focused on the melody, we didn't come up with any lyric ideas...\nArisa: At least we came up with something though, right? Anyway, we should probably start getting ready for dinner.",
+    "ground_truth": "Kasumi: Ah! Dinner! We're all gonna make it together, right?!",
+    "sonnet_score": "C",
+    "human_score": null,
+    "prediction": "Kasumi slumps slightly but then snaps upright, shaking her head with a determined grin and insisting that they can't give up yet\u2014that the perfect, relatable lyrics are still out there waiting for them."
+  },
+  {
+    "index": 79,
+    "scene": "...rfect little dice.\nArisa: I just don't like them being all misshapen. ... Like this giant piece of potato! Kasumi!\nKasumi: Congrats Arisa, you got the bonus one~\u266a\nArisa: The bonus one...? You seem pretty relaxed for someone who hasn't thought up any lyrics yet. It's almost night time!\nKasumi: Ah!\nRimi: Oh, wow... Today has gone by so quickly.\nTae: Time flies...\nArisa: Like an arrow.\nTae: That's the one.\nSaaya: I think I prefer \"when you're having fun.\" We've just been enjoying ourselves so much.",
+    "ground_truth": "Kasumi: You're right. But I feel like that every day. Ever since I met you guys, every day has gone by so quickly, like a shooting star!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi gasps and then bursts into an eager declaration that the fun they've all been having together is exactly the kind of feeling she wants to put into the lyrics!"
+  },
+  {
+    "index": 80,
+    "scene": "...I prefer \"when you're having fun.\" We've just been enjoying ourselves so much.\nKasumi: You're right. But I feel like that every day. Ever since I met you guys, every day has gone by so quickly, like a shooting star!\nRimi: I think... I feel the same. I think about it after practice. How much I wish we could just stay together like this...\nSaaya: We should all cherish these moments. We're so lucky to be able to spend time with great friends like this, you know?\nTae: I know. I'm glad I was invited.",
+    "ground_truth": "Kasumi: Hehe. Aren't you glad we both stayed behind after home ec that time, O-Tae?",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi throws her arms wide and bursts out that she's so happy they're all together, urging everyone to make every single day count just like this one."
+  },
+  {
+    "index": 81,
+    "scene": "...it after practice. How much I wish we could just stay together like this...\nSaaya: We should all cherish these moments. We're so lucky to be able to spend time with great friends like this, you know?\nTae: I know. I'm glad I was invited.\nKasumi: Hehe. Aren't you glad we both stayed behind after home ec that time, O-Tae?\nTae: It was a blessing in disguise. ... What about you, Arisa?\nArisa: Me? I... don't really... Well, I mean... It's not the worst time ever, I guess. Being together with you guys.",
+    "ground_truth": "Kasumi: Ah!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi bursts into a bright, delighted laugh and lunges toward Arisa for an enthusiastic hug, exclaiming that coming from her, that's basically the same as saying she loves them all."
+  },
+  {
+    "index": 83,
+    "scene": "...ayed behind after home ec that time, O-Tae?\nTae: It was a blessing in disguise. ... What about you, Arisa?\nArisa: Me? I... don't really... Well, I mean... It's not the worst time ever, I guess. Being together with you guys.\nKasumi: Ah!\nSaaya: Kasumi? What is it?\nKasumi: This is it! This is what the lyrics should be! We should sing about friendship! About being happy that we all have each other! It's the perfect way to bring everyone together at the festival!\n[Scene: Arisa's House - Arisa's Room]",
+    "ground_truth": "Kasumi: Whew~\u266a That was a nice bath~!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi spins toward her bandmates with bright, shining eyes, her whole body buzzing with energy as she throws her arms wide and cries out, \"Let's write it right now \u2014 together!\""
+  },
+  {
+    "index": 91,
+    "scene": "...t's good. I think I might turn in, too. I'm feeling tired myself.\nKasumi: Can we please, though... have just a little pillow fight?\nArisa: Go to bed.\nKasumi: I will! But I mean, this is kind of a slumber party, right? We can't just go straight to bed like this, can we~?\nRimi: She does have a point...\n[Scene: The Next Day]\nArisa: I don't see where pillow fighting comes into this. You're not an actual child, are you?\nTae: Hya!\nArisa: Ow. ... You're gonna regret that!\nTae: Caught it. Kasumi, catch.",
+    "ground_truth": "Kasumi: Nice pass! Here we go~! Hya~!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi catches the pillow with a delighted shout and immediately hurls it at Arisa, crying out for everyone to join in."
+  },
+  {
+    "index": 94,
+    "scene": "Arisa: Ow. ... You're gonna regret that!\nTae: Caught it. Kasumi, catch.\nKasumi: Nice pass! Here we go~! Hya~!\nSaaya: Wah! Hey, come on, why me~?\nKasumi: Join in, Saaya! Come on~!\nSaaya: ... Okay, but just a little. Catch, Rimi-rin!\nRimi: Huh? M-me~?!\nKasumi: Whew... Now that was fun.\nArisa: Ahh... phew... Look at the time... Have you finally had enough now? I'm turning out the lights.\nSaaya: Go ahead~.",
+    "ground_truth": "Kasumi: ...... ... Anyone else just get wide awake as soon as it goes dark?",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi throws her arms around the nearest bandmate with a bright, breathless laugh, declaring that they absolutely have to do this again."
+  },
+  {
+    "index": 99,
+    "scene": "... sleep.\nRimi: Me too... I... I... *yawn~*...\nKasumi: Aww. Okay. Good night, everyone.\nSaaya: Mmm. Night.\nKasumi: ...... ... Saaya? Arisa? Rimi-rin? ... Are you all asleep?\nTae: What is it, Kasumi?\nKasumi: I can't get to sleep.\nTae: ... Are you worried about the song?\nKasumi: No, it's not that. I'm excited. I'm excited to hear what we've created. And I'm just sure it's gonna be heart-pounding.\nTae: Me too. With the five of us working hard, it's sure to be great. I bet they all feel the same, too.",
+    "ground_truth": "Kasumi: Yeah... Yeah, you're right. Okay! Back to it tomorrow!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi, unable to contain her swelling excitement, rolls over toward Tae with a bright, hushed \"Yeah~!\" \u2014 savoring the quiet certainty that their song will be something incredible."
+  },
+  {
+    "index": 100,
+    "scene": "...aya? Arisa? Rimi-rin? ... Are you all asleep?\nTae: What is it, Kasumi?\nKasumi: I can't get to sleep.\nTae: ... Are you worried about the song?\nKasumi: No, it's not that. I'm excited. I'm excited to hear what we've created. And I'm just sure it's gonna be heart-pounding.\nTae: Me too. With the five of us working hard, it's sure to be great. I bet they all feel the same, too.\nKasumi: Yeah... Yeah, you're right. Okay! Back to it tomorrow!\nTae: Tomorrow. Good night...\n[Scene: Arisa's House - Basement]",
+    "ground_truth": "Kasumi: ~\u266a",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi bursts into the basement the next morning with a bright, energetic greeting, rushing to rouse her bandmates with an eager call to get started."
+  },
+  {
+    "index": 102,
+    "scene": "...o. With the five of us working hard, it's sure to be great. I bet they all feel the same, too.\nKasumi: Yeah... Yeah, you're right. Okay! Back to it tomorrow!\nTae: Tomorrow. Good night...\n[Scene: Arisa's House - Basement]\nKasumi: ~\u266a\nRimi: ... Did we do it?\nKasumi: We did it! We did the whole song! It's finished~!\nSaaya: Great. Well done everyone. I'm so glad we got it all done in time~...\nArisa: It's already evening, though. All Kasumi's playing around last night left me tired all day. *yawn~*...",
+    "ground_truth": "Kasumi: I'm sorry~. But at least we got it done! Now we can sleep all we want tonight~!",
+    "sonnet_score": "C",
+    "human_score": null,
+    "prediction": "Kasumi spins toward Arisa with a bright, unapologetic grin, throwing her arms wide and declaring that a little lost sleep was totally worth it for finishing their song together."
+  },
+  {
+    "index": 108,
+    "scene": "...es. I bet when we try to invite him, he'll tell us how it's \"out of office hours\" or something.\nKasumi: If that happens...\nRimi: If that happens...?\nKasumi: We'll just have to ask even harder!\nArisa: Yeah, great plan. There's gotta be a better way. Maybe something less pushy.\nTae: Pushy is the Kasumi way.\nKasumi: Yeah! If pushing doesn't work, you push again, and harder!\nArisa: ... Right. I guess you stick with what you're used to, huh. If anything they should understand pressure tactics anyway.",
+    "ground_truth": "Kasumi: Okay. Let's go! Excuse me~!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi pumps her fist and turns to the group with a bright, rallying grin, urging everyone forward with a loud \"Alright, let's go give it everything we've got!\""
+  },
+  {
+    "index": 115,
+    "scene": "...t may be the case... However, as I mentioned, I already have plans.\nCity Worker: You must understand my position. I am a mediator, I make decisions based on facts. Staying one step removed keeps me fair and impartial.\nArisa: Always with an answer...\nSaaya: What do you think, Kasumi? It looks like we're about done here.\nKasumi: Hrm~...\nCity Worker: If you'll excuse me. I have a number of matters that need attending to.\nMan: Excuse me, sir. We really do wish you would attend, if only for a moment.",
+    "ground_truth": "Kasumi: ...!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi snaps out of her reluctant hum and lunges forward with a burst of renewed energy, calling out directly to the city worker that he absolutely has to come\u2014because words and facts can never capture what it truly feels like to be there."
+  },
+  {
+    "index": 120,
+    "scene": "...be performing our own live show...!\nKasumi: We wrote a new song, just for the festival! We really hope you'll come and listen to it!\nCity Worker: ... Will that be all? If so, I shall excuse myself.\nArisa: He really is the worst, that guy.\nKasumi: Oh, and thank you so much for helping us back there!\nMan: We just want to do all we can to help. Did you really create a whole new song? I am amazed you found the time.\nTae: We spent all of last weekend on a songwriting retreat. We worked night and day.",
+    "ground_truth": "Kasumi: It's a really, really great song! I just can't wait for everyone here to hear it!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi beams and enthusiastically confirms, likely exclaiming something about how hard they all worked together and how she can't wait for everyone to hear it."
+  },
+  {
+    "index": 131,
+    "scene": "...l. I'll call Ran and the others, we'll all come and watch!\nArisa: ... Speaking of which. We should probably be getting ready, you know.\nKasumi: Is it that time already?\nSaaya: ... Wow, it is. We got carried away at the stalls. Come on, we should get going.\nTae: But I didn't get to see it all yet... Ah. Kasumi, look.\nKasumi: What is it, O-Tae? ... Ah!\nRimi: The candy stall...! It's so popular, it's completely surrounded by little kids.\nSaaya: I'm so glad they got to enjoy it again. Right, Kasumi?",
+    "ground_truth": "Kasumi: Yeah. ... But it's not over yet.",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi beams at the sight of the kids crowding the candy stall and turns to the others with a bright, tearful smile, exclaiming how happy she is that everyone's having such a great time."
+  },
+  {
+    "index": 137,
+    "scene": "Rimi: Ah...\nArisa: What?!\nKasumi: You mean... we can't perform our show?!\nKasumi: Sigh... We've come so far, and now we can't perform...\nArisa: I bet there wasn't ever any complaint.\nSaaya: At least the festival didn't get canceled again, I suppose...\nTae: ... This sucks.\nRimi: Kasumi-chan... What do we do now?\nKasumi: Hrm... ... Okay, I got it!\nSaaya: Got it? Got what?",
+    "ground_truth": "Kasumi: We'll go and speak to whoever complained. We'll apologize... and we'll explain how important it is that we perform today!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi straightens up with a sudden burst of renewed energy and declares that they're not giving up\u2014they'll find another way to perform, because Poppin'Party didn't come this far just to stop here."
+  },
+  {
+    "index": 141,
+    "scene": "... of the crowd gathered at the stage.\nRimi: At the stage...?\nKid's Voice: Wasn't there gonna be a band or something?\nMan's Voice: Maybe it got canceled. Shame, I was kinda looking forward to it...\nGirl's Voice: They're the girls from the Hanasakigawa School Festival, right? I really wanted to hear them perform again~.\nTae: All those people, excited for our show.\nMan: Your performance was the highlight of the evening. We even pulled some strings to help spread the word about it.\nSaaya: You did...?",
+    "ground_truth": "Kasumi: I just want to be allowed to perform...",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi gasps audibly, her eyes going wide as the reality of the waiting crowd hits her, then spins toward her bandmates with a blazing, tearful grin and practically shouts that they have to get out there right now."
+  },
+  {
+    "index": 146,
+    "scene": "... great deal more noise.\nKasumi: ... Yay!!\nRimi: Th-thank you so much!\nTae: Let's go, Kasumi. Everyone.\nKasumi: Okay! Come on, guys! It's time to play~!!\n[Scene: Downtown - Festival Stage]\nKasumi: Hello everyone! We're Poppin'Party! We're sorry we kept you all waiting like this. Thank you so much for coming out here today! Are you all enjoying the festival~? This festival... it was due to be canceled this year. But now we're here, the community center folks are here, and you guys...\nTomoe: ......",
+    "ground_truth": "Kasumi: ... And us! We're all here together! And we all made this the best festival ever!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi's eyes shine as she sweeps her gaze across the crowd and her bandmates, voice swelling with barely-contained emotion as she declares that everyone being here together is exactly what makes this festival \u2014 and Poppin'Party \u2014 so special."
+  },
+  {
+    "index": 150,
+    "scene": "Tomoe: ......\nKasumi: ... And us! We're all here together! And we all made this the best festival ever!\nSaaya: Fufu. Kasumi, Kasumi. You should probably put the audience last, right?\nKasumi: I know, I just... I really wanted to say thanks to all of you. Thank you, Saaya! Thank you, Rimi-rin!\nSaaya: Sure.\nRimi: Hehe...\nKasumi: Thank you, O-Tae!\nTae: ......\nKasumi: And thank you, Ari-\nArisa: I get it, we all get it! Now get on with the show already!",
+    "ground_truth": "Kasumi: Oh, yeah, of course! I'm sorry! This is a song that we all wrote together. We'd like to perform it for all of you today to show our great appreciation. So please listen... to Happy Happy Party!",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi, visibly moved but barely able to contain herself, turns to face the audience with a beaming grin and launches into a jubilant, rallying cry for the show to begin."
+  },
+  {
+    "index": 151,
+    "scene": "...I know, I just... I really wanted to say thanks to all of you. Thank you, Saaya! Thank you, Rimi-rin!\nSaaya: Sure.\nRimi: Hehe...\nKasumi: Thank you, O-Tae!\nTae: ......\nKasumi: And thank you, Ari-\nArisa: I get it, we all get it! Now get on with the show already!\nKasumi: Oh, yeah, of course! I'm sorry! This is a song that we all wrote together. We'd like to perform it for all of you today to show our great appreciation. So please listen... to Happy Happy Party!\n[Scene: Downtown - Festival Offstage]",
+    "ground_truth": "Kasumi: Whew... We did it...",
+    "sonnet_score": "C",
+    "human_score": null,
+    "prediction": "Kasumi bounces offstage after the performance, eyes shining, and immediately pulls her bandmates into an exuberant huddle, declaring that playing that song together was the best feeling in the whole world."
+  },
+  {
+    "index": 152,
+    "scene": "...-Tae!\nTae: ......\nKasumi: And thank you, Ari-\nArisa: I get it, we all get it! Now get on with the show already!\nKasumi: Oh, yeah, of course! I'm sorry! This is a song that we all wrote together. We'd like to perform it for all of you today to show our great appreciation. So please listen... to Happy Happy Party!\n[Scene: Downtown - Festival Offstage]\nKasumi: Whew... We did it...\nTae: We really did it.\nRimi: I... I'm so tired...\nArisa: That'll be the three encores we, for some reason, performed...",
+    "ground_truth": "Kasumi: Hey come on, they enjoyed it! And it was super fun, right?",
+    "sonnet_score": "B",
+    "human_score": null,
+    "prediction": "Kasumi throws her arms around her bandmates with a radiant, tearful grin, declaring that this is the best day of her life and that she loves them all so much."
+  },
+  {
+    "index": 161,
+    "scene": "...This was all thanks to a very special bond we share.\nCity Worker: A very special bond... Just as we work to protect the people of this city, so do you five have your own calling. I feel I learned something today.\nArisa: Just come out and say you lost already. Is it so hard to accept your own feelings?\nSaaya: Fufu. Really, Arisa? You're the one picking him up on that?\nRimi: B-but the festival! It's really coming back again next year...!\nTae: And it sounds like the city will be paying for it, too.",
+    "ground_truth": "Kasumi: Hooray! Oh, I'm so happy~! Thank you so much, everyone~!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi bursts out with an exuberant cheer, throwing her arms wide and declaring that they have to celebrate this victory together \u2014 because this is exactly what their bond can do!"
+  },
+  {
+    "index": 164,
+    "scene": "...nough here as it is.\nSaaya: There are still a lot of people around, huh... How about we take our star candies somewhere a little more relaxed?\nKasumi: Tada~! Poppin'Party star candies~!\nTae: One for each of us.\nRimi: They're so cute~. I almost don't want to eat them~.\nSaaya: Don't worry. We can always make them again next year, right?\nKasumi: Yeah, you bet we'll be doing this again next year!\nSaaya: But however many more festivals come along, I think we'll always remember this one in particular.",
+    "ground_truth": "Kasumi: I mean, just so much happened~. And this candy is like a delicious memory of it all!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi eagerly echoes Saaya's sentiment with a bright, emphatic declaration, singling out each of her bandmates by name as she insists this festival will be the one they'll never, ever forget."
+  },
+  {
+    "index": 165,
+    "scene": "... Don't worry. We can always make them again next year, right?\nKasumi: Yeah, you bet we'll be doing this again next year!\nSaaya: But however many more festivals come along, I think we'll always remember this one in particular.\nKasumi: I mean, just so much happened~. And this candy is like a delicious memory of it all!\nTae: One more memory of the five of us together.\nRimi: I hope we'll make a lot more memories like this, too. I'm already excited for next year's festival\u266a\nArisa: Just the festival~?",
+    "ground_truth": "Kasumi: The live shows, too!",
+    "sonnet_score": "A",
+    "human_score": null,
+    "prediction": "Kasumi spins toward Arisa with wide, sparkling eyes and bursts out, \"No way, not just the festival \u2014 *everything*, all of it, forever, together!\""
+  }
+]

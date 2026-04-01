@@ -19,13 +19,31 @@ def make_hypothesis_prompt(
     established_statements: list[str],
     gate_path: list[str],
     k: int = 3,
+    *,
+    falsifiability_constraints: bool = False,
 ) -> str:
-    """Build the hypothesis prompt for a cluster. Does NOT call LLM."""
+    """Build the hypothesis prompt for a cluster. Does NOT call LLM.
+
+    Args:
+        falsifiability_constraints: When True, adds explicit constraints to the
+            generation prompt: max 15 words, must be FALSE in >=30% of scenes,
+            must reference a specific behavioral trigger.
+    """
     action_scene_context = "\n\n".join(
         ["# Scene:\n" + pair["scene"] + "\n# Action:\n" + pair["action"] for pair in cluster],
     )
     established_statement_verbalized = "\n".join(established_statements) if established_statements else "N/A"
     gate_path_verbalized = "\n".join(gate_path) if gate_path else "N/A"
+
+    falsifiability_block = ""
+    if falsifiability_constraints:
+        falsifiability_block = """
+## Falsifiability Constraints (MANDATORY)
+Each action_hypothesis MUST satisfy ALL of the following:
+- At most 15 words.
+- Specific enough to be FALSE in at least 30% of the given scenes — avoid universal truths.
+- Must reference a specific behavioral trigger or context, not a general personality trait.
+"""
 
     return f"""# Scene-Action Pairs
 {action_scene_context}
@@ -48,13 +66,12 @@ To do this, please propose hypotheses for the general behavior logic of {charact
 - Consider the grounding statements in a general way.
 - The grounding statements should be concise, informative, and general sentences.
 - Never be assertive! Always make objective description of the character rather than making assertive causal relations.
-- IMPORTANT: Include at least one statement about {character}'s ATYPICAL or less frequent reactions (e.g., moments of confusion, hesitation, quiet responses, or subdued behavior). Not every response from {character} follows their dominant pattern.
 
 3. Summarize {k} potential common points of the given scenes that trigger each behavior, **which should be different from already proposed common points.**
 - The question should be simple, not ambiguous, and specific to a subset of scenes rather than always applicable.
 - Focus on the **next action** when asking! Don't ask whether certain event is involved, instead ask whether the scene might trigger potential behavior for {character}'s **next action**.
 - Directly include "{character}'s next action" in the question!
-
+{falsifiability_block}
 4. Output the hypothesized scene-action triggers in the following Python code block format:
 ```python
 action_hypotheses = [] # A list of syntactically complete statements (always mentioning {character})
@@ -121,10 +138,15 @@ def make_hypotheses_batch(
     gate_path: list[str],
     k: int = 3,
     model: str | None = None,
+    *,
+    falsifiability_constraints: bool = False,
 ) -> tuple[list[str], list[str]]:
     """Generate hypotheses for ALL clusters in parallel."""
     prompts = [
-        make_hypothesis_prompt(cluster, character, goal_topic, established_statements, gate_path, k)
+        make_hypothesis_prompt(
+            cluster, character, goal_topic, established_statements, gate_path, k,
+            falsifiability_constraints=falsifiability_constraints,
+        )
         for cluster in clusters
     ]
     items = [(str(i), prompt) for i, prompt in enumerate(prompts)]
@@ -254,11 +276,26 @@ def summarize_triggers(
     gates: list[str],
     statement_candidates: list[str],
     model: str | None = None,
+    *,
+    compress: bool = True,
 ) -> tuple[list[str], list[str]]:
-    """Summarize and compress hypothesis pairs into top 8 if needed."""
+    """Summarize and compress hypothesis pairs into top 8 if needed.
+
+    Args:
+        compress: When False, skip LLM compression and just truncate to
+            first 8 pairs. Useful when falsifiability constraints are already
+            enforced at generation time (Option A).
+    """
     paired_hypotheses = [
         {"scene_check_hypothesis": gate, "action_hypothesis": stmt} for gate, stmt in zip(gates, statement_candidates)
     ]
+
+    if not compress:
+        paired_hypotheses = paired_hypotheses[:8]
+        return (
+            [pair["scene_check_hypothesis"] for pair in paired_hypotheses],
+            [pair["action_hypothesis"] for pair in paired_hypotheses],
+        )
 
     if len(paired_hypotheses) > 8:
         boost_prompt = f"""

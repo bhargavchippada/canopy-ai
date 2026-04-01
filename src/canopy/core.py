@@ -379,6 +379,8 @@ def build_character_cdts(
     discover_extra_topics: bool = False,
     n_extra_topics: int = 4,
     merge_fn: MergeFn | None = None,
+    hypothesis_fn: HypothesisFn | None = None,
+    summarize_fn: SummarizeFn | None = None,
 ) -> tuple[dict[str, CDTNode], dict[str, CDTNode]]:
     """Build attribute and relationship CDTs for a character.
 
@@ -452,6 +454,8 @@ def build_character_cdts(
                 config=cfg,
                 _embedding_cache=embedding_cache,
                 _merge_fn=merge_fn,
+                _hypothesis_fn=hypothesis_fn,
+                _summarize_fn=summarize_fn,
             )
             futures[future] = (kind, goal_topic, topic_pairs)
 
@@ -479,6 +483,8 @@ def build_character_cdts(
                     character, goal_topic, topic_pairs,
                     config=cfg, _embedding_cache=embedding_cache,
                     _merge_fn=merge_fn,
+                    _hypothesis_fn=hypothesis_fn,
+                    _summarize_fn=summarize_fn,
                 )
                 if kind == "attr":
                     topic2cdt[goal_topic] = node
