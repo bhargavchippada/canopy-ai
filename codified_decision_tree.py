@@ -83,6 +83,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--n_extra_topics", type=int, default=4,
         help="Number of extra topics to discover (default: 4)",
     )
+    parser.add_argument(
+        "--no_merge", action="store_true", default=False,
+        help="Disable hypothesis merge (LLM dedup) during CDT construction",
+    )
 
     return parser
 
@@ -144,11 +148,15 @@ def main() -> None:
     # Phase B: Build CDTs (no GPU model loading, max_parallel=4)
     # Uses pre-computed embeddings for clustering. Only LLM API + DeBERTa.
     log.info("Phase B: Building CDTs with pre-computed embeddings...")
+    noop_merge = (lambda g, s: (list(g), list(s))) if args.no_merge else None
+    if args.no_merge:
+        log.info("Hypothesis merge DISABLED (--no_merge)")
     topic2cdt, rel_topic2cdt = build_character_cdts(
         args.character, indexed_pairs, other_characters, config,
         max_parallel=4, embedding_cache=cache,
         discover_extra_topics=args.discover_topics,
         n_extra_topics=args.n_extra_topics,
+        merge_fn=noop_merge,
     )
 
     # Compute stats

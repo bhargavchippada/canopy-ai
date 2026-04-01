@@ -7,7 +7,10 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from canopy.provenance import HypothesisQuality, Provenance
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +81,11 @@ class CDTNode:
         self.gates: list[str] = []
         self.children: list[CDTNode] = []
         self.depth = depth
+
+        # Provenance: 1:1 with statements and gates (empty for backward compat)
+        self.statement_provenance: list[Provenance | None] = []
+        self.gate_provenance: list[Provenance | None] = []
+        self.hypothesis_quality: list[HypothesisQuality | None] = []
 
         cfg = config or CDTConfig()
         established_statements = established_statements or []
@@ -251,6 +259,57 @@ class CDTNode:
                 statements.extend(child.traverse(scene))
         return statements
 
+    def get_evidence(self, statement_idx: int, pairs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Retrieve the raw observations that support a statement.
+
+        Args:
+            statement_idx: Index into self.statements.
+            pairs: The training pairs used to build this CDT.
+
+        Returns:
+            List of training pairs that produced this statement.
+            Empty list if no provenance is available.
+        """
+        if not self.statement_provenance or statement_idx >= len(self.statement_provenance):
+            return []
+        prov = self.statement_provenance[statement_idx]
+        if prov is None:
+            return []
+        return [pairs[i] for i in prov.source_pair_indices if i < len(pairs)]
+
+    def traverse_with_evidence(
+        self, scene: str, pairs: list[dict[str, Any]], *, max_evidence: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Traverse and return statements WITH their source observations.
+
+        Args:
+            scene: The scene text to evaluate against gate conditions.
+            pairs: The training pairs used to build this CDT.
+            max_evidence: Maximum supporting observations per statement.
+
+        Returns:
+            List of dicts with keys: statement, evidence, quality.
+        """
+        from canopy.validation import check_scene
+
+        results: list[dict[str, Any]] = []
+        for i, stmt in enumerate(self.statements):
+            evidence = self.get_evidence(i, pairs)
+            quality = (
+                self.hypothesis_quality[i]
+                if self.hypothesis_quality and i < len(self.hypothesis_quality)
+                else None
+            )
+            results.append({
+                "statement": stmt,
+                "evidence": evidence[:max_evidence],
+                "quality": quality,
+            })
+        for gate, child in zip(self.gates, self.children):
+            if check_scene([scene], [gate])[0]:
+                results.extend(child.traverse_with_evidence(scene, pairs, max_evidence=max_evidence))
+        return results
+
     def verbalize(self, indent: int = 0) -> str:
         """Convert tree to human-readable indented text."""
         prefix = "  " * indent
@@ -261,6 +320,20 @@ class CDTNode:
             lines.append(f'{prefix}IF "{gate}":')
             lines.append(child.verbalize(indent + 1))
         return "\n".join(lines) if lines else f"{prefix}(empty)"
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Pickle serialization — include provenance fields."""
+        return self.__dict__
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Pickle deserialization — backfill missing provenance for old pickles."""
+        self.__dict__.update(state)
+        if not hasattr(self, "statement_provenance"):
+            self.statement_provenance = []
+        if not hasattr(self, "gate_provenance"):
+            self.gate_provenance = []
+        if not hasattr(self, "hypothesis_quality"):
+            self.hypothesis_quality = []
 
     def count_stats(self) -> dict[str, int]:
         """Count tree statistics recursively.
@@ -305,6 +378,7 @@ def build_character_cdts(
     embedding_cache: Any | None = None,
     discover_extra_topics: bool = False,
     n_extra_topics: int = 4,
+    merge_fn: MergeFn | None = None,
 ) -> tuple[dict[str, CDTNode], dict[str, CDTNode]]:
     """Build attribute and relationship CDTs for a character.
 
@@ -364,7 +438,7 @@ def build_character_cdts(
 
     topic2cdt: dict[str, CDTNode] = {}
     rel_topic2cdt: dict[str, CDTNode] = {}
-    failed: list[str] = []
+    failed: list[tuple[str, str, list[dict[str, Any]]]] = []
 
     with ThreadPoolExecutor(max_workers=max_parallel) as executor:
         futures = {}
@@ -377,11 +451,12 @@ def build_character_cdts(
                 topic_pairs,
                 config=cfg,
                 _embedding_cache=embedding_cache,
+                _merge_fn=merge_fn,
             )
-            futures[future] = (kind, goal_topic)
+            futures[future] = (kind, goal_topic, topic_pairs)
 
         for future in as_completed(futures):
-            kind, goal_topic = futures[future]
+            kind, goal_topic, topic_pairs = futures[future]
             try:
                 node = future.result()
                 if kind == "attr":
@@ -391,12 +466,36 @@ def build_character_cdts(
                 log.info("Completed CDT: %s", goal_topic)
             except Exception:
                 log.exception("Failed to build CDT: %s", goal_topic)
-                failed.append(goal_topic)
+                failed.append((kind, goal_topic, topic_pairs))
 
+    # Retry failed topics sequentially (avoids concurrent rate limiting)
     if failed:
-        if not topic2cdt and not rel_topic2cdt:
-            raise RuntimeError(f"CDT build failed for ALL {len(failed)} topic(s): {failed}")
-        log.warning("CDT build failed for %d topic(s): %s — returning partial results", len(failed), failed)
+        log.info("Retrying %d failed topic(s) sequentially...", len(failed))
+        still_failed: list[str] = []
+        for kind, goal_topic, topic_pairs in failed:
+            log.info("Retrying: %s", goal_topic)
+            try:
+                node = CDTNode(
+                    character, goal_topic, topic_pairs,
+                    config=cfg, _embedding_cache=embedding_cache,
+                    _merge_fn=merge_fn,
+                )
+                if kind == "attr":
+                    topic2cdt[goal_topic] = node
+                else:
+                    rel_topic2cdt[goal_topic] = node
+                log.info("Retry succeeded: %s", goal_topic)
+            except Exception:
+                log.exception("Retry failed: %s", goal_topic)
+                still_failed.append(goal_topic)
+
+        if still_failed:
+            if not topic2cdt and not rel_topic2cdt:
+                raise RuntimeError(f"CDT build failed for ALL {len(still_failed)} topic(s): {still_failed}")
+            log.warning(
+                "CDT build failed for %d topic(s) after retry: %s — returning partial results",
+                len(still_failed), still_failed,
+            )
 
     return topic2cdt, rel_topic2cdt
 

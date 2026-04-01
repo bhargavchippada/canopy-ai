@@ -169,6 +169,37 @@ Directly answer only yes/no/unknown."""
     return np.concatenate(all_probs, axis=0)  # (N, 3)
 
 
+def check_statement_pair_entailment(
+    character: str,
+    statement: str,
+    actions: list[str],
+    bs: int = 64,
+) -> float:
+    """Check how well a statement is entailed by a set of actions.
+
+    Computes the mean NLI True probability across all (statement, action) pairs.
+    This measures grounding fidelity: how strongly the source observations
+    support the hypothesis.
+
+    Args:
+        character: Character name for the NLI prompt.
+        statement: The hypothesis statement to check.
+        actions: Source actions from the cluster that generated this hypothesis.
+        bs: Batch size for NLI inference.
+
+    Returns:
+        Mean NLI True probability (0.0 to 1.0). Higher = better grounding.
+    """
+    if not actions:
+        return 0.0
+    per_pair = check_statement_probs_per_pair(
+        character, actions, [statement] * len(actions), bs=bs,
+    )
+    # per_pair shape: (N, 3) with [false, none, true]
+    true_probs = per_pair[:, 2]
+    return float(true_probs.mean())
+
+
 def validate_hypothesis(
     character: str,
     pairs: list[dict[str, Any]],

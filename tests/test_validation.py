@@ -184,6 +184,94 @@ class TestCheckStatementProbs:
             val._device = saved_dev
 
 
+class TestCheckStatementPairEntailment:
+    def test_empty_actions_returns_zero(self) -> None:
+        import canopy.validation as val
+
+        result = val.check_statement_pair_entailment("Alice", "stmt", [])
+        assert result == 0.0
+
+    def test_returns_mean_true_prob(self) -> None:
+        import canopy.validation as val
+
+        # 3 pairs, each with [false, none, true] probs
+        per_pair = np.array([
+            [0.1, 0.2, 0.7],
+            [0.2, 0.3, 0.5],
+            [0.3, 0.1, 0.6],
+        ])
+        logits_placeholder = torch.tensor([[1.0, 2.0, 3.0]])
+        _, _, saved_clf, saved_tok, saved_dev = _setup_mock_classifier(
+            val, logits_placeholder
+        )
+
+        try:
+            with patch.object(
+                val, "check_statement_probs_per_pair", return_value=per_pair
+            ) as mock_pp:
+                result = val.check_statement_pair_entailment(
+                    "Alice", "Alice is kind", ["a1", "a2", "a3"],
+                )
+            # Mean of [0.7, 0.5, 0.6] = 0.6
+            assert abs(result - 0.6) < 1e-6
+            mock_pp.assert_called_once()
+            call_args = mock_pp.call_args
+            assert call_args[0][0] == "Alice"
+            assert call_args[0][1] == ["a1", "a2", "a3"]
+            assert call_args[0][2] == ["Alice is kind"] * 3
+        finally:
+            val._classifier = saved_clf
+            val._classifier_tokenizer = saved_tok
+            val._device = saved_dev
+
+    def test_single_action(self) -> None:
+        import canopy.validation as val
+
+        per_pair = np.array([[0.1, 0.1, 0.8]])
+        logits_placeholder = torch.tensor([[1.0, 2.0, 3.0]])
+        _, _, saved_clf, saved_tok, saved_dev = _setup_mock_classifier(
+            val, logits_placeholder
+        )
+
+        try:
+            with patch.object(
+                val, "check_statement_probs_per_pair", return_value=per_pair
+            ):
+                result = val.check_statement_pair_entailment(
+                    "Bob", "Bob is brave", ["action1"],
+                )
+            assert abs(result - 0.8) < 1e-6
+        finally:
+            val._classifier = saved_clf
+            val._classifier_tokenizer = saved_tok
+            val._device = saved_dev
+
+    def test_bs_forwarded(self) -> None:
+        """Verify bs parameter is forwarded to check_statement_probs_per_pair."""
+        import canopy.validation as val
+
+        per_pair = np.array([[0.1, 0.2, 0.7], [0.2, 0.3, 0.5]])
+        logits_placeholder = torch.tensor([[1.0, 2.0, 3.0]])
+        _, _, saved_clf, saved_tok, saved_dev = _setup_mock_classifier(
+            val, logits_placeholder
+        )
+
+        try:
+            with patch.object(
+                val, "check_statement_probs_per_pair", return_value=per_pair
+            ) as mock_pp:
+                val.check_statement_pair_entailment(
+                    "Alice", "stmt", ["a1", "a2"], bs=16,
+                )
+            # Verify bs=16 was passed through
+            call_kwargs = mock_pp.call_args
+            assert call_kwargs.kwargs.get("bs") == 16
+        finally:
+            val._classifier = saved_clf
+            val._classifier_tokenizer = saved_tok
+            val._device = saved_dev
+
+
 class TestValidateHypothesis:
     def test_no_gate_keeps_all_pairs(self) -> None:
         """When hypothesized_question is None, all pairs pass the scene filter."""

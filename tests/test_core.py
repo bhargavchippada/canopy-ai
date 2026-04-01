@@ -15,6 +15,7 @@ from canopy.core import (
     CDTNode,
     build_character_cdts,
 )
+from canopy.provenance import HypothesisQuality, Provenance
 
 # ---------------------------------------------------------------------------
 # CDTConfig
@@ -417,8 +418,8 @@ class TestBuildCharacterCdts:
         with pytest.raises(ValueError, match="max_parallel must be >= 1"):
             build_character_cdts("Alice", [], [], max_parallel=-1)
 
-    def test_build_character_cdts_handles_partial_failure(self) -> None:
-        """A single topic failure returns partial results instead of raising."""
+    def test_build_character_cdts_retries_failed_topics(self) -> None:
+        """A transient topic failure is retried sequentially and recovers."""
         call_count = 0
 
         def _failing_cdtnode(*args: Any, **kwargs: Any) -> CDTNode:
@@ -435,7 +436,27 @@ class TestBuildCharacterCdts:
 
         with patch("canopy.core.CDTNode", side_effect=_failing_cdtnode):
             topic2cdt, _rel = build_character_cdts("Alice", [], [], config=CDTConfig())
-            assert len(topic2cdt) == 3  # 3 of 4 attribute topics succeeded
+            assert len(topic2cdt) == 4  # retry recovers the failed topic
+
+    def test_build_character_cdts_handles_partial_failure(self) -> None:
+        """Persistent failure after retry returns partial results."""
+        fail_topics: set[str] = set()
+
+        def _persistent_fail(*args: Any, **kwargs: Any) -> CDTNode:
+            goal_topic = args[1] if len(args) > 1 else kwargs.get("goal_topic", "")
+            if "personality" in goal_topic:
+                fail_topics.add(goal_topic)
+                raise RuntimeError("GPU OOM")
+            node = CDTNode.__new__(CDTNode)
+            node.statements = []
+            node.gates = []
+            node.children = []
+            node.depth = 1
+            return node
+
+        with patch("canopy.core.CDTNode", side_effect=_persistent_fail):
+            topic2cdt, _rel = build_character_cdts("Alice", [], [], config=CDTConfig())
+            assert len(topic2cdt) == 3  # personality failed even after retry
 
     def test_build_character_cdts_handles_total_failure(self) -> None:
         """All topics failing raises RuntimeError."""
@@ -547,3 +568,186 @@ class TestCDTNodeCacheForwarding:
         call_kwargs = mock_scc.call_args
         # embedding_cache should be None (no cache provided)
         assert call_kwargs.kwargs.get("embedding_cache") is None
+
+
+# ---------------------------------------------------------------------------
+# CDTNode — provenance fields and methods
+# ---------------------------------------------------------------------------
+
+
+class TestCDTNodeProvenance:
+    def test_new_node_has_empty_provenance(self) -> None:
+        node = CDTNode("Alice", "identity", None, built_statements=["s1"])
+        assert node.statement_provenance == []
+        assert node.gate_provenance == []
+        assert node.hypothesis_quality == []
+
+    def test_get_evidence_no_provenance(self) -> None:
+        node = CDTNode("Alice", "identity", None, built_statements=["s1"])
+        pairs = [{"action": "a0", "scene": "s0"}]
+        assert node.get_evidence(0, pairs) == []
+
+    def test_get_evidence_out_of_range(self) -> None:
+        node = CDTNode("Alice", "identity", None, built_statements=["s1"])
+        node.statement_provenance = [Provenance(source_pair_indices=(0,))]
+        pairs = [{"action": "a0", "scene": "s0"}]
+        assert node.get_evidence(5, pairs) == []
+
+    def test_get_evidence_none_provenance_entry(self) -> None:
+        node = CDTNode("Alice", "identity", None, built_statements=["s1"])
+        node.statement_provenance = [None]
+        pairs = [{"action": "a0", "scene": "s0"}]
+        assert node.get_evidence(0, pairs) == []
+
+    def test_get_evidence_with_provenance(self) -> None:
+        node = CDTNode("Alice", "identity", None, built_statements=["s1", "s2"])
+        pairs = [{"action": f"a{i}", "scene": f"s{i}"} for i in range(5)]
+        node.statement_provenance = [
+            Provenance(source_pair_indices=(0, 2, 4)),
+            Provenance(source_pair_indices=(1, 3)),
+        ]
+        evidence = node.get_evidence(0, pairs)
+        assert len(evidence) == 3
+        assert evidence[0] == pairs[0]
+        assert evidence[1] == pairs[2]
+        assert evidence[2] == pairs[4]
+
+    def test_get_evidence_skips_out_of_bounds_indices(self) -> None:
+        node = CDTNode("Alice", "identity", None, built_statements=["s1"])
+        pairs = [{"action": "a0", "scene": "s0"}, {"action": "a1", "scene": "s1"}]
+        node.statement_provenance = [Provenance(source_pair_indices=(0, 99))]
+        evidence = node.get_evidence(0, pairs)
+        assert len(evidence) == 1
+        assert evidence[0] == pairs[0]
+
+    def test_traverse_with_evidence_no_provenance(self) -> None:
+        node = CDTNode("Alice", "identity", None, built_statements=["s1"])
+        pairs = [{"action": "a0", "scene": "s0"}]
+        with patch("canopy.validation.check_scene"):
+            results = node.traverse_with_evidence("any scene", pairs)
+        assert len(results) == 1
+        assert results[0]["statement"] == "s1"
+        assert results[0]["evidence"] == []
+        assert results[0]["quality"] is None
+
+    def test_traverse_with_evidence_with_provenance(self) -> None:
+        pairs = [{"action": f"a{i}", "scene": f"s{i}"} for i in range(5)]
+        prov = Provenance(source_pair_indices=(0, 1, 2, 3, 4))
+        hq = HypothesisQuality(0.7, 0.1, 0.2, 0.3, 12, 0.65)
+
+        node = CDTNode("Alice", "identity", None, built_statements=["s1"])
+        node.statement_provenance = [prov]
+        node.hypothesis_quality = [hq]
+
+        with patch("canopy.validation.check_scene"):
+            results = node.traverse_with_evidence("any scene", pairs)
+        assert len(results) == 1
+        assert results[0]["statement"] == "s1"
+        assert len(results[0]["evidence"]) == 3  # max_evidence default=3
+        assert results[0]["quality"] is hq
+
+    def test_traverse_with_evidence_custom_max(self) -> None:
+        pairs = [{"action": f"a{i}", "scene": f"s{i}"} for i in range(10)]
+        prov = Provenance(source_pair_indices=tuple(range(10)))
+        node = CDTNode("Alice", "identity", None, built_statements=["s1"])
+        node.statement_provenance = [prov]
+
+        with patch("canopy.validation.check_scene"):
+            results = node.traverse_with_evidence("scene", pairs, max_evidence=5)
+        assert len(results[0]["evidence"]) == 5
+
+    def test_traverse_with_evidence_follows_gates(self) -> None:
+        pairs = [{"action": f"a{i}", "scene": f"s{i}"} for i in range(3)]
+        root = CDTNode("Alice", "identity", None, built_statements=["root_stmt"])
+        child = CDTNode("Alice", "identity", None, built_statements=["child_stmt"], depth=2)
+        child.statement_provenance = [Provenance(source_pair_indices=(1, 2))]
+        root.gates = ["Is helping?"]
+        root.children = [child]
+
+        with patch("canopy.validation.check_scene", return_value=[True]):
+            results = root.traverse_with_evidence("helping scene", pairs)
+        assert len(results) == 2
+        assert results[0]["statement"] == "root_stmt"
+        assert results[1]["statement"] == "child_stmt"
+        assert len(results[1]["evidence"]) == 2
+
+    def test_traverse_with_evidence_skips_failed_gates(self) -> None:
+        pairs = [{"action": "a0", "scene": "s0"}]
+        root = CDTNode("Alice", "identity", None, built_statements=["root_stmt"])
+        child = CDTNode("Alice", "identity", None, built_statements=["child_stmt"], depth=2)
+        root.gates = ["Is fighting?"]
+        root.children = [child]
+
+        with patch("canopy.validation.check_scene", return_value=[False]):
+            results = root.traverse_with_evidence("peaceful scene", pairs)
+        assert len(results) == 1
+        assert results[0]["statement"] == "root_stmt"
+
+
+class TestCDTNodePickleBackwardCompat:
+    def test_old_pickle_without_provenance(self) -> None:
+        """Simulate loading an old pickle that lacks provenance fields."""
+        node = CDTNode("Alice", "identity", None, built_statements=["s1"])
+        # Simulate old pickle by removing provenance fields
+        state = node.__dict__.copy()
+        del state["statement_provenance"]
+        del state["gate_provenance"]
+        del state["hypothesis_quality"]
+
+        restored = CDTNode.__new__(CDTNode)
+        restored.__setstate__(state)
+
+        assert restored.statements == ["s1"]
+        assert restored.statement_provenance == []
+        assert restored.gate_provenance == []
+        assert restored.hypothesis_quality == []
+
+    def test_new_pickle_preserves_provenance(self) -> None:
+        import pickle
+
+        node = CDTNode("Alice", "identity", None, built_statements=["s1"])
+        prov = Provenance(source_pair_indices=(0, 1))
+        hq = HypothesisQuality(0.7, 0.1, 0.2, 0.3, 12, 0.65)
+        node.statement_provenance = [prov]
+        node.hypothesis_quality = [hq]
+        node.gate_provenance = []
+
+        restored = pickle.loads(pickle.dumps(node))
+        assert restored.statement_provenance == [prov]
+        assert restored.hypothesis_quality == [hq]
+        assert restored.gate_provenance == []
+
+    def test_multi_node_tree_backward_compat(self) -> None:
+        """Root + child both missing provenance fields survive pickle roundtrip."""
+        root = CDTNode("Alice", "identity", None, built_statements=["root_s"])
+        child = CDTNode("Alice", "identity", None, built_statements=["child_s"], depth=2)
+        root.gates = ["Is helping?"]
+        root.children = [child]
+
+        # Simulate old pickle by stripping provenance from both nodes
+        root_state = root.__dict__.copy()
+        child_state = child.__dict__.copy()
+        for key in ("statement_provenance", "gate_provenance", "hypothesis_quality"):
+            del root_state[key]
+            del child_state[key]
+
+        # Manually reconstruct via __setstate__
+        restored_root = CDTNode.__new__(CDTNode)
+        restored_child = CDTNode.__new__(CDTNode)
+        restored_child.__setstate__(child_state)
+        root_state["children"] = [restored_child]
+        restored_root.__setstate__(root_state)
+
+        assert restored_root.statements == ["root_s"]
+        assert restored_root.statement_provenance == []
+        assert restored_root.children[0].statements == ["child_s"]
+        assert restored_root.children[0].statement_provenance == []
+        assert restored_root.children[0].gate_provenance == []
+        assert restored_root.children[0].hypothesis_quality == []
+
+    def test_getstate_returns_dict(self) -> None:
+        node = CDTNode("Alice", "identity", None, built_statements=["s1"])
+        state = node.__getstate__()
+        assert isinstance(state, dict)
+        assert "statements" in state
+        assert "statement_provenance" in state
